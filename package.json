@@ -1,0 +1,46 @@
+{
+  "name": "microcosm",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Arc-native programmable payments monorepo for Microcosm",
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "packages/adapters/*"
+  ],
+  "scripts": {
+    "build": "node ./node_modules/typescript/bin/tsc -p tsconfig.json",
+    "typecheck": "node ./node_modules/typescript/bin/tsc --noEmit -p tsconfig.json",
+    "test": "node --experimental-strip-types --test apps/**/*.test.ts packages/*/test/**/*.test.ts packages/adapters/*/test/**/*.test.ts",
+    "db:apply-schema": "node ./node_modules/tsx/dist/cli.mjs --env-file=.env apps/api/src/apply-schema.ts",
+    "check:api-runtime": "node ./node_modules/tsx/dist/cli.mjs --env-file=.env apps/api/src/runtime-check.ts",
+    "start:api": "node ./node_modules/tsx/dist/cli.mjs --env-file=.env apps/api/src/main.ts",
+    "start:worker": "node ./node_modules/tsx/dist/cli.mjs --env-file=.env apps/worker/src/main.ts",
+    "contracts:test": "forge test --root packages/contracts",
+    "contracts:deploy:arc-testnet": "forge script packages/contracts/script/DeployArcContracts.s.sol:DeployArcContracts --root packages/contracts --rpc-url $ARC_TESTNET_RPC_URL --broadcast",
+    "checkpoint": "python3 scripts/create_checkpoint.py manual",
+    "checkpoint:android": "python3 scripts/create_checkpoint.py manual --android",
+    "bridge": "node ./node_modules/tsx/dist/cli.mjs --env-file=.env examples/bridge.ts",
+    "swap": "node ./node_modules/tsx/dist/cli.mjs --env-file=.env examples/swap.ts",
+    "send": "node ./node_modules/tsx/dist/cli.mjs --env-file=.env examples/send.ts"
+  },
+  "dependencies": {
+    "@circle-fin/adapter-viem-v2": "^1.8.2",
+    "@circle-fin/app-kit": "^1.3.0",
+    "@polymarket/clob-client": "^5.8.1",
+    "@privy-io/node": "^0.14.0",
+    "@privy-io/react-auth": "^3.21.2",
+    "@xmtp/node-sdk": "^6.0.0",
+    "ethers": "^5.8.0",
+    "pg": "^8.20.0",
+    "polkamarkets-js": "^3.4.6",
+    "viem": "^2.47.12",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^24.7.2",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3"
+  }
+}

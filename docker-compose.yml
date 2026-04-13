@@ -1,0 +1,39 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: microcosm-postgres
+    environment:
+      POSTGRES_DB: microcosm
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - microcosm-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d microcosm"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: microcosm-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      PORT: 3000
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/microcosm
+    ports:
+      - "3000:3000"
+    command: >
+      bash -lc "npm run db:apply-schema && npm run start:api"
+
+volumes:
+  microcosm-postgres-data:
+

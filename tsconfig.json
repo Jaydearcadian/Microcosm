@@ -1,0 +1,39 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "types": ["node"],
+    "baseUrl": ".",
+    "paths": {
+      "@mcosm/config": ["packages/config/src/index.ts"],
+      "@mcosm/sdk": ["packages/sdk/src/index.ts"],
+      "@mcosm/adapter-registry": ["packages/adapters/registry/src/index.ts"],
+      "@mcosm/adapter-arc": ["packages/adapters/arc/src/index.ts"],
+      "@mcosm/adapter-privy": ["packages/adapters/privy/src/index.ts"],
+      "@mcosm/adapter-xmtp": ["packages/adapters/xmtp/src/index.ts"],
+      "@mcosm/adapter-allium": ["packages/adapters/allium/src/index.ts"],
+      "@mcosm/adapter-uniblock": ["packages/adapters/uniblock/src/index.ts"],
+      "@mcosm/adapter-myriad": ["packages/adapters/myriad/src/index.ts"],
+      "@mcosm/adapter-polymarket": ["packages/adapters/polymarket/src/index.ts"],
+      "@mcosm/adapter-hyperliquid": ["packages/adapters/hyperliquid/src/index.ts"],
+      "@mcosm/adapter-lighter": ["packages/adapters/lighter/src/index.ts"]
+    },
+    "outDir": "dist"
+  },
+  "include": [
+    "apps/**/*.ts",
+    "examples/**/*.ts",
+    "packages/**/*.ts"
+  ],
+  "exclude": [
+    "dist",
+    "node_modules"
+  ]
+}

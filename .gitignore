@@ -1,0 +1,70 @@
+# Environment files with secrets
+.env
+.env.local
+.env.*.local
+
+# Node modules
+node_modules/
+
+# Build outputs
+dist/
+build/
+packages/contracts/out/
+packages/contracts/cache/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Lock files (keep package-lock.json if using npm)
+# package-lock.json
+
+# Circle recovery files (IMPORTANT: never commit these)
+*-recovery-file.json
+*.pem
+
+# Local AI/editor tooling state
+.adal/
+.agents/
+.augment/
+.bob/
+.claude/
+.codebuddy/
+.commandcode/
+.continue/
+.cortex/
+.crush/
+.factory/
+.goose/
+.iflow/
+.junie/
+.kilocode/
+.kiro/
+.kode/
+.mcpjam/
+.mux/
+.neovate/
+.openhands/
+.pi/
+.pochi/
+.qoder/
+.qwen/
+.roo/
+.trae/
+.vibe/
+.windsurf/
+.zencoder/
+
+# Local archives and exports
+checkpoints/
+output/
