@@ -24,7 +24,8 @@
       "@mcosm/adapter-polymarket": ["packages/adapters/polymarket/src/index.ts"],
       "@mcosm/adapter-hyperliquid": ["packages/adapters/hyperliquid/src/index.ts"],
       "@mcosm/adapter-lighter": ["packages/adapters/lighter/src/index.ts"],
-      "@mcosm/api-contracts": ["packages/api-contracts/src/index.ts"]
+      "@mcosm/api-contracts": ["packages/api-contracts/src/index.ts"],
+      "@mcosm/spaces": ["packages/spaces/src/index.ts"]
     },
     "outDir": "dist"
   },

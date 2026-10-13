@@ -4,12 +4,89 @@ import {
   type RecipientResolutionInput,
   type ResolvedRecipient
 } from "../../recipient-resolution/src/index.ts";
+import { verifyMessage } from "viem";
+import { randomBytes } from "node:crypto";
 
 export type UserRecord = {
   id: string;
   email: string;
   privyUserId: string;
   walletAddress?: string;
+};
+
+export type ExternalIdentity = {
+  provider: "privy";
+  subject: string;
+  linkedAt: string;
+  identityType?: "email" | "social" | "passkey" | "wallet" | "other";
+};
+
+export type IdentityResolution = {
+  user: UserRecord;
+  created: boolean;
+};
+
+export type WalletLinkChallenge = {
+  id: string;
+  userId: string;
+  spaceId: string;
+  address: `0x${string}`;
+  nonce: string;
+  message: string;
+  expiresAt: string;
+};
+
+export const createWalletLinkChallenge = (input: {
+  userId: string;
+  spaceId: string;
+  address: string;
+  ttlMs?: number;
+}): WalletLinkChallenge => {
+  const ttl = input.ttlMs ?? 300_000;
+  const expiresAt = new Date(Date.now() + ttl).toISOString();
+  const nonce = randomBytes(16).toString("hex");
+  const normAddress = input.address.toLowerCase() as `0x${string}`;
+  const message = [
+    "Microcosm Wallet Association Request",
+    `Account: ${input.userId}`,
+    `Space: ${input.spaceId}`,
+    `Wallet: ${normAddress}`,
+    `Nonce: ${nonce}`,
+    `Expires: ${expiresAt}`,
+    "",
+    "Sign this message to securely link your wallet to your Microcosm account. This does not authorize any transaction or transfer."
+  ].join("\n");
+
+  return {
+    id: `chg_${randomBytes(12).toString("hex")}`,
+    userId: input.userId,
+    spaceId: input.spaceId,
+    address: normAddress,
+    nonce,
+    message,
+    expiresAt
+  };
+};
+
+export const verifyWalletLinkChallenge = async (input: {
+  challenge: WalletLinkChallenge;
+  signature: `0x${string}` | string;
+  now?: Date;
+}): Promise<boolean> => {
+  const currentTime = input.now ?? new Date();
+  if (currentTime.getTime() > new Date(input.challenge.expiresAt).getTime()) {
+    throw new Error(`Challenge has expired at ${input.challenge.expiresAt}`);
+  }
+
+  try {
+    return await verifyMessage({
+      address: input.challenge.address,
+      message: input.challenge.message,
+      signature: input.signature as `0x${string}`
+    });
+  } catch {
+    return false;
+  }
 };
 
 export type IdentityState = {
@@ -46,6 +123,10 @@ export type IdentityService = {
   resolveRecipient: (input: RecipientResolutionInput) => ResolvedRecipient;
   getRecipient: (id: string) => ResolvedRecipient | undefined;
   getUserByPrivyUserId: (privyUserId: string) => UserRecord | undefined;
+  resolveOrCreatePrincipal: (input: {
+    externalIdentity: ExternalIdentity;
+    email?: string;
+  }) => Promise<IdentityResolution>;
   claimRecipient: (
     recipientId: string,
     input: ClaimRecipientInput
@@ -167,6 +248,36 @@ export const createIdentityService = ({
     getUserByPrivyUserId(privyUserId) {
       const user = [...users.values()].find((item) => item.privyUserId === privyUserId);
       return user ? structuredClone(user) : undefined;
+    },
+    async resolveOrCreatePrincipal(input) {
+      const normEmail = input.email ? normalizeEmail(input.email) : undefined;
+      const existingBySubject = [...users.values()].find(
+        (u) => u.privyUserId === input.externalIdentity.subject
+      );
+
+      if (existingBySubject) {
+        if (normEmail && existingBySubject.email !== normEmail) {
+          existingBySubject.email = normEmail;
+          users.set(existingBySubject.id, structuredClone(existingBySubject));
+        }
+        return {
+          user: structuredClone(existingBySubject),
+          created: false
+        };
+      }
+
+      const user: UserRecord = {
+        id: nextUserId(),
+        email: normEmail ?? "",
+        privyUserId: input.externalIdentity.subject,
+        walletAddress: undefined
+      };
+
+      users.set(user.id, structuredClone(user));
+      return {
+        user: structuredClone(user),
+        created: true
+      };
     },
     async claimRecipient(recipientId, input) {
       const recipient = recipients.get(recipientId);
