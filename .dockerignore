@@ -1,0 +1,10 @@
+node_modules
+.env
+.env.*
+checkpoints
+output
+storage
+dist
+.DS_Store
+npm-debug.log*
+
