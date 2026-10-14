@@ -1,10 +1,9 @@
-import { NextRequest, NextResponse } from "next/server";
-import { createPublicClient, http, encodeFunctionData, isAddress } from "viem";
+import { NextRequest, NextResponse } from "next/server.js";
+import { createPublicClient, http, isAddress } from "viem";
 
 export const dynamic = "force-dynamic";
 
 const ARC_USDC_ADDRESS = "0x3600000000000000000000000000000000000000" as const;
-const ERC20_TRANSFER_EVENT_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 
 const erc20Abi = [
   {
@@ -13,16 +12,6 @@ const erc20Abi = [
     stateMutability: "view",
     inputs: [{ name: "account", type: "address" }],
     outputs: [{ name: "", type: "uint256" }]
-  },
-  {
-    name: "transfer",
-    type: "function",
-    stateMutability: "nonpayable",
-    inputs: [
-      { name: "recipient", type: "address" },
-      { name: "amount", type: "uint256" }
-    ],
-    outputs: [{ name: "", type: "bool" }]
   }
 ] as const;
 
@@ -37,51 +26,152 @@ function getNetworkConfig() {
   return { isMainnet, chainId, rpcUrl, tokenAddress: ARC_USDC_ADDRESS };
 }
 
-// In-memory tenant store for serverless demo/session state
-const memoryDb = {
-  users: new Map<string, any>(),
-  recipients: new Map<string, any[]>(),
-  envelopes: new Map<string, any[]>(),
-  intents: new Map<string, any[]>(),
-  payments: new Map<string, any>(),
-  submissions: new Map<string, any>(),
-  challenges: new Map<string, any>()
-};
+/**
+ * Handle onchain balance reads.
+ * Fails closed: rejects invalid addresses with 400, and returns 503 on RPC failures.
+ * Never returns a fabricated zero balance on error.
+ */
+async function handleBalanceRead(req: NextRequest): Promise<NextResponse> {
+  const address = req.nextUrl.searchParams.get("address");
+  const { chainId, rpcUrl, tokenAddress } = getNetworkConfig();
 
-function extractBearerToken(req: NextRequest): string | null {
-  const auth = req.headers.get("authorization");
-  if (!auth || !auth.startsWith("Bearer ")) return null;
-  return auth.slice(7).trim();
-}
-
-function resolveUser(token: string) {
-  // Deterministic user resolution from token or subject
-  const sub = token.slice(0, 32);
-  const userId = `usr_${Buffer.from(sub).toString("hex").slice(0, 16)}`;
-  const spaceId = `spc_personal_${userId.slice(4)}`;
-
-  if (!memoryDb.users.has(userId)) {
-    const user = {
-      id: userId,
-      status: "active",
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
-    memoryDb.users.set(userId, user);
+  if (!address) {
+    // If MICROCOSM_API_PROXY is configured, let upstream resolve from authenticated session
+    if (process.env.MICROCOSM_API_PROXY) {
+      return proxyToSecuredApi(req, "balance");
+    }
+    return NextResponse.json(
+      { error: "missing_address", message: "Query parameter 'address' is required to read onchain balance" },
+      { status: 400 }
+    );
   }
 
-  const user = memoryDb.users.get(userId);
-  const space = {
-    id: spaceId,
-    name: "Personal Space",
-    type: "personal",
-    role: "owner",
-    status: "active",
-    createdAt: user.createdAt,
-    updatedAt: user.updatedAt
-  };
+  if (!isAddress(address)) {
+    return NextResponse.json(
+      { error: "invalid_address", message: `Address '${address}' is not a valid EVM address` },
+      { status: 400 }
+    );
+  }
 
-  return { user, space, sub };
+  try {
+    const publicClient = createPublicClient({
+      transport: http(rpcUrl)
+    });
+
+    const balance = await publicClient.readContract({
+      address: tokenAddress,
+      abi: erc20Abi,
+      functionName: "balanceOf",
+      args: [address as `0x${string}`]
+    });
+
+    const baseUnits = BigInt(balance.toString());
+    const whole = baseUnits / 1_000_000n;
+    const frac = baseUnits % 1_000_000n;
+    const amountDecimal = `${whole.toString()}.${frac.toString().padStart(6, "0")}`;
+
+    return NextResponse.json({
+      asset: "USDC",
+      amountBaseUnits: baseUnits.toString(),
+      amountDecimal,
+      decimals: 6,
+      chainId,
+      tokenAddress
+    });
+  } catch (err) {
+    return NextResponse.json(
+      {
+        error: "rpc_unavailable",
+        message: err instanceof Error ? err.message : "Failed to read onchain balance from Arc RPC",
+        chainId,
+        tokenAddress
+      },
+      { status: 503 }
+    );
+  }
+}
+
+/**
+ * Proxy request to the authoritative, secured Microcosm API backend.
+ * Fails closed if MICROCOSM_API_PROXY is not configured or upstream is unreachable.
+ * Forwards authorization, headers, query string, and body without caching.
+ */
+async function proxyToSecuredApi(req: NextRequest, path: string): Promise<NextResponse> {
+  const proxyBaseUrl = process.env.MICROCOSM_API_PROXY;
+
+  if (!proxyBaseUrl || proxyBaseUrl.trim() === "") {
+    return NextResponse.json(
+      {
+        error: "api_gateway_unconfigured",
+        code: "api_gateway_unconfigured",
+        message: "Microcosm secured API proxy upstream is not configured. Set MICROCOSM_API_PROXY."
+      },
+      { status: 503 }
+    );
+  }
+
+  const targetUrl = `${proxyBaseUrl.replace(/\/+$/, "")}/v1/${path}${req.nextUrl.search}`;
+
+  const headers = new Headers();
+  const hopByHopHeaders = new Set([
+    "connection",
+    "keep-alive",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "te",
+    "trailers",
+    "transfer-encoding",
+    "upgrade",
+    "content-length",
+    "host"
+  ]);
+
+  for (const [key, value] of req.headers.entries()) {
+    if (!hopByHopHeaders.has(key.toLowerCase())) {
+      headers.set(key, value);
+    }
+  }
+
+  let body: string | undefined;
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    try {
+      body = await req.text();
+    } catch {
+      body = undefined;
+    }
+  }
+
+  try {
+    const upstreamRes = await fetch(targetUrl, {
+      method: req.method,
+      headers,
+      body,
+      cache: "no-store",
+      signal: AbortSignal.timeout(15000)
+    });
+
+    const responseHeaders = new Headers();
+    for (const [key, value] of upstreamRes.headers.entries()) {
+      if (!hopByHopHeaders.has(key.toLowerCase()) && key.toLowerCase() !== "content-encoding") {
+        responseHeaders.set(key, value);
+      }
+    }
+
+    const responseBody = await upstreamRes.text();
+    return new NextResponse(responseBody, {
+      status: upstreamRes.status,
+      headers: responseHeaders
+    });
+  } catch (err) {
+    return NextResponse.json(
+      {
+        error: "api_upstream_unavailable",
+        code: "api_upstream_unavailable",
+        message: err instanceof Error ? err.message : "Microcosm secured API upstream is unreachable"
+      },
+      { status: 503 }
+    );
+  }
 }
 
 export async function GET(
@@ -90,143 +180,12 @@ export async function GET(
 ) {
   const { slug } = await context.params;
   const path = slug.join("/");
-  const token = extractBearerToken(req);
-
-  if (path === "me") {
-    if (!token) {
-      return NextResponse.json(
-        { error: "unauthorized", code: "unauthorized", message: "Missing authorization token" },
-        { status: 401 }
-      );
-    }
-
-    const { user, space, sub } = resolveUser(token);
-    return NextResponse.json({
-      user,
-      identities: [
-        {
-          provider: "privy",
-          providerSubject: sub,
-          verifiedAt: user.createdAt
-        }
-      ],
-      personalSpace: space,
-      activeSpace: space,
-      wallets: []
-    });
-  }
 
   if (path === "balance") {
-    const address = req.nextUrl.searchParams.get("address");
-    const { chainId, rpcUrl, tokenAddress } = getNetworkConfig();
-
-    if (!address || !isAddress(address)) {
-      return NextResponse.json({
-        asset: "USDC",
-        amountBaseUnits: "0",
-        amountDecimal: "0.000000",
-        decimals: 6,
-        chainId,
-        tokenAddress
-      });
-    }
-
-    try {
-      const publicClient = createPublicClient({
-        transport: http(rpcUrl)
-      });
-
-      const balance = await publicClient.readContract({
-        address: tokenAddress,
-        abi: erc20Abi,
-        functionName: "balanceOf",
-        args: [address as `0x${string}`]
-      });
-
-      const baseUnits = BigInt(balance.toString());
-      const whole = baseUnits / 1_000_000n;
-      const frac = baseUnits % 1_000_000n;
-      const amountDecimal = `${whole.toString()}.${frac.toString().padStart(6, "0")}`;
-
-      return NextResponse.json({
-        asset: "USDC",
-        amountBaseUnits: baseUnits.toString(),
-        amountDecimal,
-        decimals: 6,
-        chainId,
-        tokenAddress
-      });
-    } catch (err) {
-      return NextResponse.json({
-        asset: "USDC",
-        amountBaseUnits: "0",
-        amountDecimal: "0.000000",
-        decimals: 6,
-        chainId,
-        tokenAddress,
-        error: err instanceof Error ? err.message : "rpc_error"
-      });
-    }
+    return handleBalanceRead(req);
   }
 
-  if (path === "spaces") {
-    if (!token) {
-      return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-    }
-    const { space } = resolveUser(token);
-    return NextResponse.json({ spaces: [space] });
-  }
-
-  if (path === "recipients") {
-    if (!token) {
-      return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-    }
-    const { space } = resolveUser(token);
-    const list = memoryDb.recipients.get(space.id) || [];
-    return NextResponse.json(list);
-  }
-
-  if (path === "envelopes") {
-    if (!token) {
-      return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-    }
-    const { space } = resolveUser(token);
-    const list = memoryDb.envelopes.get(space.id) || [];
-    return NextResponse.json(list);
-  }
-
-  if (path === "intents") {
-    if (!token) {
-      return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-    }
-    const { space } = resolveUser(token);
-    const list = memoryDb.intents.get(space.id) || [];
-    return NextResponse.json(list);
-  }
-
-  if (path.startsWith("payments/")) {
-    const paymentId = path.split("/")[1];
-    const payment = memoryDb.payments.get(paymentId);
-    if (!payment) {
-      return NextResponse.json({ error: "payment_not_found" }, { status: 404 });
-    }
-    return NextResponse.json({ payment });
-  }
-
-  if (path === "activity") {
-    return NextResponse.json({
-      activity: [
-        {
-          id: "act_init",
-          type: "space.created",
-          summary: "Microcosm Space initialized",
-          createdAt: new Date().toISOString()
-        }
-      ]
-    });
-  }
-
-  return NextResponse.json({ error: "route_not_found", path }, { status: 404 });
+  return proxyToSecuredApi(req, path);
 }
 
 export async function POST(
@@ -235,183 +194,26 @@ export async function POST(
 ) {
   const { slug } = await context.params;
   const path = slug.join("/");
-  const token = extractBearerToken(req);
 
-  let body: any = {};
-  try {
-    body = await req.json();
-  } catch {
-    body = {};
-  }
+  return proxyToSecuredApi(req, path);
+}
 
-  if (path === "wallet/challenge") {
-    const challengeId = `ch_${Date.now()}`;
-    const challenge = {
-      challengeId,
-      message: `Sign to bind wallet to Microcosm: challenge_${challengeId}`,
-      expiresAt: new Date(Date.now() + 300_000).toISOString()
-    };
-    memoryDb.challenges.set(challengeId, challenge);
-    return NextResponse.json(challenge);
-  }
+export async function PUT(
+  req: NextRequest,
+  context: { params: Promise<{ slug: string[] }> }
+) {
+  const { slug } = await context.params;
+  const path = slug.join("/");
 
-  if (path === "wallet/verify") {
-    return NextResponse.json({
-      verified: true,
-      address: body.address,
-      linkedAt: new Date().toISOString()
-    });
-  }
+  return proxyToSecuredApi(req, path);
+}
 
-  if (path === "recipients") {
-    if (!token) {
-      return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-    }
-    const { space } = resolveUser(token);
-    const recipient = {
-      id: `rcp_${Date.now()}`,
-      spaceId: space.id,
-      name: body.name || "Recipient",
-      destination: body.destination || body.address,
-      createdAt: new Date().toISOString()
-    };
-    const list = memoryDb.recipients.get(space.id) || [];
-    list.push(recipient);
-    memoryDb.recipients.set(space.id, list);
-    return NextResponse.json({ recipient }, { status: 201 });
-  }
+export async function DELETE(
+  req: NextRequest,
+  context: { params: Promise<{ slug: string[] }> }
+) {
+  const { slug } = await context.params;
+  const path = slug.join("/");
 
-  if (path === "envelopes") {
-    if (!token) {
-      return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-    }
-    const { space } = resolveUser(token);
-    const envelope = {
-      id: `env_${Date.now()}`,
-      spaceId: space.id,
-      name: body.name || "USDC Envelope",
-      asset: "USDC",
-      createdAt: new Date().toISOString()
-    };
-    const list = memoryDb.envelopes.get(space.id) || [];
-    list.push(envelope);
-    memoryDb.envelopes.set(space.id, list);
-    return NextResponse.json({ envelope }, { status: 201 });
-  }
-
-  if (path === "intents") {
-    if (!token) {
-      return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-    }
-    const { space } = resolveUser(token);
-    const intent = {
-      id: `int_${Date.now()}`,
-      spaceId: space.id,
-      recipient: body.recipient,
-      amount: body.amount,
-      amountBaseUnits: body.amountBaseUnits || "0",
-      status: "approved",
-      createdAt: new Date().toISOString()
-    };
-    const list = memoryDb.intents.get(space.id) || [];
-    list.push(intent);
-    memoryDb.intents.set(space.id, list);
-    return NextResponse.json({ intent, evaluation: { approved: true } }, { status: 201 });
-  }
-
-  if (path === "payments/prepare") {
-    const { chainId, tokenAddress } = getNetworkConfig();
-    const paymentId = `pay_${Date.now()}`;
-    const to = body.to || body.recipient || "0x0000000000000000000000000000000000000000";
-    const amountBaseUnits = BigInt(body.amountBaseUnits || "0");
-
-    let calldata = "0x";
-    if (isAddress(to) && amountBaseUnits > 0n) {
-      calldata = encodeFunctionData({
-        abi: erc20Abi,
-        functionName: "transfer",
-        args: [to as `0x${string}`, amountBaseUnits]
-      });
-    }
-
-    const prepared = {
-      paymentId,
-      intentId: body.intentId || `int_${Date.now()}`,
-      chainId,
-      tokenAddress,
-      to,
-      amountBaseUnits: amountBaseUnits.toString(),
-      calldata,
-      value: "0",
-      status: "prepared",
-      createdAt: new Date().toISOString()
-    };
-
-    memoryDb.payments.set(paymentId, prepared);
-    return NextResponse.json(prepared);
-  }
-
-  if (path.includes("/submission") || path === "payments/submission") {
-    const paymentId = path.split("/")[1] || body.paymentId || `pay_${Date.now()}`;
-    const submission = {
-      paymentId,
-      txHash: body.txHash,
-      chainId: body.chainId || getNetworkConfig().chainId,
-      senderAddress: body.senderAddress,
-      status: "submitted",
-      submittedAt: new Date().toISOString()
-    };
-
-    memoryDb.submissions.set(paymentId, submission);
-    return NextResponse.json({ ok: true, submission });
-  }
-
-  if (path.includes("/confirm")) {
-    const paymentId = path.split("/")[1];
-    const submission = memoryDb.submissions.get(paymentId);
-    const { chainId, rpcUrl, tokenAddress } = getNetworkConfig();
-
-    if (!submission?.txHash) {
-      return NextResponse.json({ error: "missing_tx_hash", message: "No transaction hash recorded for payment" }, { status: 400 });
-    }
-
-    try {
-      const publicClient = createPublicClient({
-        transport: http(rpcUrl)
-      });
-
-      const receipt = await publicClient.getTransactionReceipt({
-        hash: submission.txHash as `0x${string}`
-      });
-
-      if (!receipt || receipt.status !== "success") {
-        return NextResponse.json({
-          ok: false,
-          status: receipt ? "failed" : "pending",
-          message: receipt ? "Transaction reverted onchain" : "Receipt pending block inclusion"
-        });
-      }
-
-      return NextResponse.json({
-        ok: true,
-        payment: {
-          id: paymentId,
-          status: "confirmed",
-          txHash: submission.txHash,
-          blockNumber: receipt.blockNumber.toString(),
-          blockHash: receipt.blockHash,
-          chainId,
-          tokenAddress
-        }
-      });
-    } catch (err) {
-      return NextResponse.json({
-        ok: false,
-        status: "pending",
-        message: err instanceof Error ? err.message : "Receipt verification pending"
-      });
-    }
-  }
-
-  return NextResponse.json({ error: "route_not_found", path }, { status: 404 });
+  return proxyToSecuredApi(req, path);
 }

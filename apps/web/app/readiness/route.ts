@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "next/server.js";
 
 export const dynamic = "force-dynamic";
 
@@ -10,6 +10,7 @@ export async function GET() {
     ? (process.env.ARC_MAINNET_RPC_URL || defaultRpc)
     : (process.env.ARC_TESTNET_RPC_URL || defaultRpc);
 
+  // 1. Check Arc RPC connectivity & Chain ID
   let rpcStatus = "ok";
   let observedChainId: number | null = null;
   let rpcError: string | null = null;
@@ -48,19 +49,55 @@ export async function GET() {
     rpcError = err instanceof Error ? err.message : "rpc_fetch_failed";
   }
 
-  const isReady = rpcStatus === "ok";
+  // 2. Check Secured API upstream connectivity via MICROCOSM_API_PROXY
+  const proxyUrl = process.env.MICROCOSM_API_PROXY;
+  let apiProxyStatus = "not_configured";
+  let apiProxyOrigin: string | null = null;
+  let apiProxyError: string | null = null;
+
+  if (proxyUrl && proxyUrl.trim().length > 0) {
+    try {
+      const u = new URL(proxyUrl);
+      apiProxyOrigin = u.origin;
+      const res = await fetch(`${u.origin}/health`, {
+        signal: AbortSignal.timeout(5000)
+      });
+      if (res.ok) {
+        apiProxyStatus = "ok";
+      } else {
+        apiProxyStatus = "error";
+        apiProxyError = `HTTP_${res.status}`;
+      }
+    } catch (err) {
+      apiProxyStatus = "unreachable";
+      apiProxyError = err instanceof Error ? err.message : "upstream_fetch_failed";
+    }
+  }
+
+  const isRpcReady = rpcStatus === "ok";
+  const isApiReady = apiProxyStatus === "ok";
+  const isOverallReady = isRpcReady && isApiReady;
 
   return NextResponse.json(
     {
-      status: isReady ? "ready" : "degraded",
-      network: isMainnet ? "mainnet" : "testnet",
-      expectedChainId,
-      observedChainId,
-      rpcStatus,
-      rpcError,
-      usdcAddress: "0x3600000000000000000000000000000000000000",
+      status: isOverallReady ? "ready" : "degraded",
+      scope: "application",
+      arcRpc: {
+        network: isMainnet ? "mainnet" : "testnet",
+        expectedChainId,
+        observedChainId,
+        status: rpcStatus,
+        error: rpcError,
+        usdcAddress: "0x3600000000000000000000000000000000000000"
+      },
+      apiUpstream: {
+        configured: Boolean(proxyUrl && proxyUrl.trim().length > 0),
+        origin: apiProxyOrigin,
+        status: apiProxyStatus,
+        error: apiProxyError
+      },
       timestamp: new Date().toISOString()
     },
-    { status: isReady ? 200 : 503 }
+    { status: isOverallReady ? 200 : 503 }
   );
 }

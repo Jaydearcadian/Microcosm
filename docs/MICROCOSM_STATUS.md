@@ -25,7 +25,7 @@ The following items are verified with passing commands from the repository check
 
 - `npm run typecheck` passes (0 errors across monorepo root, API, worker, and packages)
 - `npm run typecheck --workspace=@mcosm/web` passes (0 errors across Next.js app and route handlers)
-- `npm test` passes (133 of 133 automated unit, integration, and security tests passing)
+- `npm test` passes (134 of 134 automated unit, integration, and security tests passing, including production-routes suite)
 - `npm run build --workspace=@mcosm/web` passes (all static pages and dynamic serverless route handlers compiled)
 - Next.js production web application live on Vercel at `https://charcoal-brown.vercel.app`
 - Sensitive environment files excluded from Vercel deployments via `.vercelignore`
@@ -40,10 +40,10 @@ The following items are verified with passing commands from the repository check
 
 | Gate | Focus Area | Status | Evidence Class | Verification Proof |
 | :---: | :--- | :---: | :---: | :--- |
-| **G0** | **Baseline & Repository** | **PASS** | `LOCAL_PASS` | Clean monorepo dependencies, zero-error typechecking, 133/133 tests passing, PostgreSQL concurrency & persistence tests verified. |
+| **G0** | **Baseline & Repository** | **PASS** | `LOCAL_PASS` | Clean monorepo dependencies, zero-error typechecking, 134/134 tests passing, PostgreSQL concurrency & persistence tests verified. |
 | **G1** | **Identity & Space Isolation** | **PASS** | `LOCAL_PASS` | Centralized `/v1` dispatcher, canonical principal resolution decoupled from email/wallet, multi-tenant Space isolation, viewer role read-only guards, single-use EIP-191 cryptographic wallet linking. Remediated through independent security code review. |
-| **G2** | **Consumer Web UI & Live API** | **PASS** | `LIVE_READ_PASS` | Mobile-first and desktop-responsive web app in `apps/web`. Pure `BigInt` exact base units, Privy social login, `/money` (send flow), `/receive` (QR deposit address), `/people` (isolated contacts), `/activity` (verifiable receipt feed), `/settings`. Next.js API route handlers `/health`, `/readiness`, `/v1/*` deployed directly on Vercel. |
-| **G3** | **Live Arc Settlement Verification** | **PASS (Testnet) / WAITING_ON_USER_WALLET_APPROVAL (Mainnet)** | `LIVE_WRITE_PASS` (Testnet) / `WAITING_ON_USER_WALLET_APPROVAL` (Mainnet) | Live transfer executed on Arc Testnet (chain `5042002`). Transfer verified via `verifyUsdcTransfer` checking ERC-20 `Transfer` topic (`0xddf25...`), verified contract `0x3600...0000`, sender, recipient, and base units. Mined in block `67174208`. Evidence recorded in `docs/ARC_SETTLEMENT.md`. Mainnet transfer awaits user wallet signing approval. |
+| **G2** | **Consumer Web UI & Gateway** | **PASS (UI) / PROXY FAIL-CLOSED (API)** | `LIVE_READ_PASS` | Mobile-first and desktop-responsive web app in `apps/web`. Pure `BigInt` exact base units, Privy social login, `/money` (send flow), `/receive` (QR deposit address), `/people` (isolated contacts), `/activity` (verifiable receipt feed), `/settings`. Next.js gateway routes (`/health`, `/readiness`, `/v1/*`) proxy to secured backend via `MICROCOSM_API_PROXY`, strictly failing closed with 503 if unconfigured or unreachable. Mock in-memory Maps and synthetic tokens removed. |
+| **G3** | **Live Arc Settlement Verification** | **PASS (Testnet) / PENDING USER WALLET SIGNING (Mainnet)** | `LIVE_WRITE_PASS` (Testnet) / `WAITING_ON_USER_WALLET_APPROVAL` (Mainnet) | Live transfer executed on Arc Testnet (chain `5042002`). Transfer verified via `verifyUsdcTransfer` checking ERC-20 `Transfer` topic (`0xddf25...`), verified contract `0x3600...0000`, sender, recipient, and base units. Mined in block `67174208`. Evidence recorded in `docs/ARC_SETTLEMENT.md`. Mainnet RPC and USDC contract verified onchain; mainnet transfer awaits user wallet signing approval. |
 | **G4** | **Deployment & Release Evidence** | **PASS** | `VERIFIED_REMOTE` | Public HTTPS consumer app and serverless API live on Vercel at `https://charcoal-brown.vercel.app`, GitHub repository public at `https://github.com/Jaydearcadian/Microcosm`. Sensitive environment files excluded from deployment bundle via `.vercelignore`. |
 | **G5** | **Submission Pack & DoraHacks Handoff** | **DRAFT READY** | `VERIFIED_REMOTE` | Formatted submission pack complete with project pitch, primitives breakdown, architecture diagrams, and copy-paste application form in `docs/SUBMISSION_PACK.md`. Final interactive submission on DoraHacks awaits user button click. |
 

@@ -108,8 +108,10 @@ export const createApiClient = (config: ApiClientConfig = {}) => {
       return request<MeResponse>("/v1/me");
     },
 
-    async getBalance(asset: string = "USDC"): Promise<BalanceResponse> {
-      return request<BalanceResponse>(`/v1/balance?asset=${encodeURIComponent(asset)}`);
+    async getBalance(asset: string = "USDC", address?: string): Promise<BalanceResponse> {
+      const params = new URLSearchParams({ asset });
+      if (address) params.set("address", address);
+      return request<BalanceResponse>(`/v1/balance?${params.toString()}`);
     },
 
     async listSpaces(): Promise<{ spaces: any[] }> {

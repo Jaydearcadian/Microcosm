@@ -20,26 +20,28 @@ export const WalletSummary: React.FC = () => {
 
     try {
       const client = createApiClient({ getSpaceId: () => activeSpace.id });
-      const res = await client.getBalance("USDC");
+      const res = await client.getBalance("USDC", primaryWallet?.address);
       setBalance(res.amountDecimal);
     } catch (err: unknown) {
+      setBalance(null);
       if (err instanceof ApiClientError) {
         setError(err.message);
       } else {
-        // Fallback default for un-funded demo address
-        setBalance("0.000000");
+        setError(err instanceof Error ? err.message : "Failed to load balance from Arc RPC");
       }
     } finally {
       setLoading(false);
     }
-  }, [authenticated, activeSpace]);
+  }, [authenticated, activeSpace, primaryWallet?.address]);
 
   useEffect(() => {
     void fetchBalance();
   }, [fetchBalance]);
 
   const formattedBalance = (() => {
-    if (!balance) return "0.00";
+    if (balance === null || balance === undefined) {
+      return error ? "Unavailable" : "--";
+    }
     const [whole = "0", fraction = "00"] = balance.split(".");
     try {
       const formattedWhole = BigInt(whole).toLocaleString("en-US");
