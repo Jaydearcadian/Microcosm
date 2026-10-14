@@ -1,6 +1,6 @@
 # Microcosm
 
-[![Vercel Deployment](https://img.shields.io/badge/Vercel-Deployed-success?style=flat&logo=vercel)](https://charcoal-brown.vercel.app)
+[![Vercel Deployment](https://img.shields.io/badge/Vercel-Deployed-success?style=flat&logo=vercel)](https://microcosmonarc.vercel.app)
 [![GitHub Repository](https://img.shields.io/badge/GitHub-Public-blue?style=flat&logo=github)](https://github.com/Jaydearcadian/Microcosm)
 [![Network](https://img.shields.io/badge/Arc_Network-Mainnet_5042_%7C_Testnet_5042002-blueviolet)](#network-configuration)
 [![USDC Contract](https://img.shields.io/badge/Arc_USDC-0x3600...0000-green)](#network-configuration)
@@ -11,7 +11,7 @@ Microcosm is an Arc-native programmable payments and multi-tenant financial coor
 
 ## Live Links & Release Status
 
-- **Production Consumer Web App:** [https://charcoal-brown.vercel.app](https://charcoal-brown.vercel.app)
+- **Production Consumer Web App:** [https://microcosmonarc.vercel.app](https://microcosmonarc.vercel.app)
 - **Public GitHub Repository:** [https://github.com/Jaydearcadian/Microcosm](https://github.com/Jaydearcadian/Microcosm)
 - **Arc Testnet Verified Settlement:** Tx [`0xb9ff68b720ccc128a8791435979dd08b50ea16d189df212a0e4a256b321be408`](https://testnet.arcscan.app/tx/0xb9ff68b720ccc128a8791435979dd08b50ea16d189df212a0e4a256b321be408) (Block `67174208`)
 
@@ -167,7 +167,7 @@ node ./node_modules/tsx/dist/cli.mjs scripts/verify-arc-settlement.ts
 | **G1** | **Identity & Space Isolation** | **PASS** | Centralized `/v1` dispatcher, canonical principal resolution decoupled from email/wallet, multi-tenant Space isolation, viewer role read-only guards, single-use EIP-191 cryptographic wallet linking. Remediation completed through independent security code review. |
 | **G2** | **Consumer Web UI** | **PASS** | Mobile-first and desktop-responsive web app in `apps/web`. Pure `BigInt` exact base units, Privy social login, `/money` (send flow), `/receive` (QR deposit address), `/people` (isolated contacts), `/activity` (verifiable receipt feed), `/settings`. Production Next.js build passes cleanly. |
 | **G3** | **Live Arc Settlement Verification** | **PASS (Testnet) / AWAITING_MAINNET_TX** | Verified testnet transfer on Arc Testnet (chain `5042002`, block `67174208`, tx `0xb9ff68b7...21be408`) via `verifyUsdcTransfer`. Production mainnet transfer awaits user wallet signing approval. |
-| **G4** | **Deployment & Verification Evidence** | **PASS** | Public HTTPS consumer app live on Vercel at `https://charcoal-brown.vercel.app`, GitHub repository public at `https://github.com/Jaydearcadian/Microcosm`. |
+| **G4** | **Deployment & Verification Evidence** | **PASS** | Public HTTPS consumer app live on Vercel at `https://microcosmonarc.vercel.app`, GitHub repository public at `https://github.com/Jaydearcadian/Microcosm`. |
 | **G5** | **Submission Pack & DoraHacks Handoff** | **PASS** | Formatted submission pack with project pitch, primitives breakdown, architecture diagrams, and copy-paste application form. |
 
 ---

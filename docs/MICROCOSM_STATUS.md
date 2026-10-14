@@ -11,7 +11,7 @@ This document is the execution-state companion to the architecture, PRD, and imp
 Microcosm v0.1 is implemented, tested, and deployed to production for the Arc Microgrants release:
 
 - **Public Repository:** [`https://github.com/Jaydearcadian/Microcosm`](https://github.com/Jaydearcadian/Microcosm)
-- **Live Production Deployment:** [`https://charcoal-brown.vercel.app`](https://charcoal-brown.vercel.app)
+- **Live Production Deployment:** [`https://microcosmonarc.vercel.app`](https://microcosmonarc.vercel.app)
 - **Architecture Model:** `Microcosm → Spaces → people/agents/money/rules → actions/settlement`
 - **Identity Model:** Permanent canonical principal decoupled from external login providers (Privy, Google, email, wallet address).
 - **Execution Model:** Non-custodial client wallet signing on consumer routes. Zero server settlement keys (`ARC_SETTLEMENT_PRIVATE_KEY` unset on public API).
@@ -27,7 +27,7 @@ The following items are verified with passing commands from the repository check
 - `npm run typecheck --workspace=@mcosm/web` passes (0 errors across Next.js app and route handlers)
 - `npm test` passes (134 of 134 automated unit, integration, and security tests passing, including production-routes suite)
 - `npm run build --workspace=@mcosm/web` passes (all static pages and dynamic serverless route handlers compiled)
-- Next.js production web application live on Vercel at `https://charcoal-brown.vercel.app`
+- Next.js production web application live on Vercel at `https://microcosmonarc.vercel.app`
 - Sensitive environment files excluded from Vercel deployments via `.vercelignore`
 - Real Arc Testnet transaction executed and confirmed onchain (`0xb9ff68b720ccc128a8791435979dd08b50ea16d189df212a0e4a256b321be408`, block `67174208`)
 - Arc Mainnet RPC (`https://rpc.mainnet.arc.io/`) verified returning chain ID `0x13b2` (`5042`)
@@ -44,7 +44,7 @@ The following items are verified with passing commands from the repository check
 | **G1** | **Identity & Space Isolation** | **PASS** | `LOCAL_PASS` | Centralized `/v1` dispatcher, canonical principal resolution decoupled from email/wallet, multi-tenant Space isolation, viewer role read-only guards, single-use EIP-191 cryptographic wallet linking. Remediated through independent security code review. |
 | **G2** | **Consumer Web UI & Gateway** | **PASS (UI) / PROXY FAIL-CLOSED (API)** | `LIVE_READ_PASS` | Mobile-first and desktop-responsive web app in `apps/web`. Pure `BigInt` exact base units, Privy social login, `/money` (send flow), `/receive` (QR deposit address), `/people` (isolated contacts), `/activity` (verifiable receipt feed), `/settings`. Next.js gateway routes (`/health`, `/readiness`, `/v1/*`) proxy to secured backend via `MICROCOSM_API_PROXY`, strictly failing closed with 503 if unconfigured or unreachable. Mock in-memory Maps and synthetic tokens removed. |
 | **G3** | **Live Arc Settlement Verification** | **PASS (Testnet) / PENDING USER WALLET SIGNING (Mainnet)** | `LIVE_WRITE_PASS` (Testnet) / `WAITING_ON_USER_WALLET_APPROVAL` (Mainnet) | Live transfer executed on Arc Testnet (chain `5042002`). Transfer verified via `verifyUsdcTransfer` checking ERC-20 `Transfer` topic (`0xddf25...`), verified contract `0x3600...0000`, sender, recipient, and base units. Mined in block `67174208`. Evidence recorded in `docs/ARC_SETTLEMENT.md`. Mainnet RPC and USDC contract verified onchain; mainnet transfer awaits user wallet signing approval. |
-| **G4** | **Deployment & Release Evidence** | **PASS** | `VERIFIED_REMOTE` | Public HTTPS consumer app and serverless API live on Vercel at `https://charcoal-brown.vercel.app`, GitHub repository public at `https://github.com/Jaydearcadian/Microcosm`. Sensitive environment files excluded from deployment bundle via `.vercelignore`. |
+| **G4** | **Deployment & Release Evidence** | **PASS** | `VERIFIED_REMOTE` | Public HTTPS consumer app and serverless API live on Vercel at `https://microcosmonarc.vercel.app`, GitHub repository public at `https://github.com/Jaydearcadian/Microcosm`. Sensitive environment files excluded from deployment bundle via `.vercelignore`. |
 | **G5** | **Submission Pack & DoraHacks Handoff** | **DRAFT READY** | `VERIFIED_REMOTE` | Formatted submission pack complete with project pitch, primitives breakdown, architecture diagrams, and copy-paste application form in `docs/SUBMISSION_PACK.md`. Final interactive submission on DoraHacks awaits user button click. |
 
 ---
