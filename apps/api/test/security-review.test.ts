@@ -432,12 +432,12 @@ test("Task 9: Security Review & Identity Gate (Gates G0 & G1 Verification)", asy
     // Alice creates a shared space and adds Charlie as viewer
     const appInstance = await server.app;
 
-    const sharedSpace = await appInstance.spaces.createSpace(alicePrincipalId, {
+    const sharedSpace = await appInstance.spaces.createSpace!(alicePrincipalId, {
       name: "Shared Team Space",
       type: "shared"
     });
 
-    await appInstance.spaces.addMember({
+    await appInstance.spaces.addMember!({
       spaceId: sharedSpace.id,
       userId: charliePrincipalId,
       role: "viewer"
@@ -520,7 +520,7 @@ test("Task 9: Security Review & Identity Gate (Gates G0 & G1 Verification)", asy
     assert.equal(charlieMutWallet.status, 403);
 
     // Revocation Test: Alice revokes Charlie's membership
-    await appInstance.spaces.revokeMembership(charliePrincipalId, sharedSpace.id);
+    await appInstance.spaces.revokeMembership!(charliePrincipalId, sharedSpace.id);
 
     // Any operation by Charlie in shared space now returns 403 forbidden immediately
     const charlieRevokedRes = await fetch(`${server.url}/v1/envelopes`, { headers: charlieHeaders });
@@ -709,6 +709,123 @@ test("Task 9: Security Review & Identity Gate (Gates G0 & G1 Verification)", asy
     });
     assert.equal(reSubmitAfterConfirm.status, 409);
     assert.equal((await reSubmitAfterConfirm.json()).error, "invalid_state_transition");
+
+    // (d) Confirmation fails closed (409) if payment is not in submitted/confirming state
+    const noTxPaymentRes = await fetch(`${server.url}/v1/payments`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${aliceToken}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        intentId: aliceIntent.id
+      })
+    });
+    const noTxPayment = (await noTxPaymentRes.json()).payment;
+    const confirmPreparedAttempt = await fetch(`${server.url}/v1/payments/${noTxPayment.id}/confirm`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${aliceToken}` }
+    });
+    assert.equal(confirmPreparedAttempt.status, 409);
+    assert.equal((await confirmPreparedAttempt.json()).error, "invalid_state_transition");
+
+    // (e) Confirmation fails closed (503 confirmer_unavailable) if app.confirmer is unconfigured
+    const unconfiguredServer = createApiServer({
+      auth: { verifier, required: true }
+    });
+    await unconfiguredServer.start();
+    try {
+      // Create recipient on unconfigured server
+      const uRcpRes = await fetch(`${unconfiguredServer.url}/v1/recipients`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${aliceToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          id: "rcp_unconf",
+          recipientType: "wallet",
+          displayLabel: "Test Recipient",
+          address: "0x1111111111111111111111111111111111111111"
+        })
+      });
+      assert.equal(uRcpRes.status, 201);
+      const { recipient: uRecipient } = await uRcpRes.json();
+
+      // Create envelope on unconfigured server
+      const uEnvRes = await fetch(`${unconfiguredServer.url}/v1/envelopes`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${aliceToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          id: "env_unconf",
+          asset: "USDC",
+          maxAmountPerTx: "500.00",
+          maxAmountPerDay: "1000.00",
+          allowedRecipientIds: [uRecipient.id],
+          schedule: { days: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"], startHourUtc: 0, endHourUtc: 24 }
+        })
+      });
+      assert.equal(uEnvRes.status, 201);
+      const uEnv = await uEnvRes.json();
+
+      // Create approved intent on unconfigured server
+      const uIntRes = await fetch(`${unconfiguredServer.url}/v1/intents`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${aliceToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          id: "int_unconf",
+          envelopeId: uEnv.id,
+          recipientId: uRecipient.id,
+          amount: "50.00",
+          asset: "USDC",
+          type: "send_money",
+          executedAt: new Date().toISOString(),
+          spentToday: "0.00"
+        })
+      });
+      assert.equal(uIntRes.status, 201);
+      const { intent: uIntent } = await uIntRes.json();
+      assert.equal(uIntent.status, "approved");
+
+      // Create payment
+      const pRes = await fetch(`${unconfiguredServer.url}/v1/payments`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${aliceToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({ intentId: uIntent.id })
+      });
+      const pData = (await pRes.json()).payment;
+
+      await fetch(`${unconfiguredServer.url}/v1/payments/${pData.id}/submission`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${aliceToken}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          txHash: "0x8888888888888888888888888888888888888888888888888888888888888888",
+          chainId: 5042
+        })
+      });
+
+      const unconfAttempt = await fetch(`${unconfiguredServer.url}/v1/payments/${pData.id}/confirm`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${aliceToken}` }
+      });
+      assert.equal(unconfAttempt.status, 503);
+      const unconfErr = await unconfAttempt.json();
+      assert.equal(unconfErr.error, "confirmer_unavailable");
+    } finally {
+      await unconfiguredServer.stop();
+    }
   } finally {
     await server.stop();
   }

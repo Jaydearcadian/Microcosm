@@ -5,6 +5,7 @@ import {
   createSettlementConfirmationLoop,
   createArcSettlementExecutor,
   createSettlementStore,
+  createArcSettlementConfirmer,
   type SettlementRecord
 } from "../../../packages/settlement/src/index.ts";
 import {
@@ -506,7 +507,11 @@ export const createApiApp = (
     },
     spaces,
     notifications,
-    confirmer: options.settlement?.confirmer
+    confirmer:
+      options.settlement?.confirmer ??
+      (process.env.ARC_TESTNET_RPC_URL
+        ? createArcSettlementConfirmer({ rpcUrl: process.env.ARC_TESTNET_RPC_URL })
+        : undefined)
   };
 };
 

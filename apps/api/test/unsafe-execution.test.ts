@@ -22,6 +22,12 @@ test("Task 8: Remove Unsafe Server-Signed Consumer Execution & Enforce Intent-Bo
     auth: {
       verifier,
       required: true
+    },
+    settlement: {
+      confirmer: async () => ({
+        confirmed: true,
+        checkedAt: new Date().toISOString()
+      })
     }
   });
 

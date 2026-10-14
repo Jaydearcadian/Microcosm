@@ -9,6 +9,8 @@ create table if not exists users (
 
 -- In case users table already existed with not null email
 alter table if exists users alter column email drop not null;
+alter table if exists users drop constraint if exists users_email_key;
+create index if not exists users_email_idx on users(email);
 
 create table if not exists organizations (
   id text primary key,
@@ -88,7 +90,7 @@ alter table if exists wallets add column if not exists space_id text;
 
 create table if not exists recipients (
   id text primary key,
-  lookup_key text not null unique,
+  lookup_key text not null,
   owner_type text not null check (owner_type in ('user', 'agent', 'organization', 'external')),
   owner_id text,
   wallet_address text,
@@ -100,6 +102,8 @@ create table if not exists recipients (
 );
 
 alter table if exists recipients add column if not exists space_id text;
+alter table if exists recipients drop constraint if exists recipients_lookup_key_key;
+create unique index if not exists recipients_space_lookup_key_idx on recipients(coalesce(space_id, 'global'), lookup_key);
 
 create table if not exists envelopes (
   id text primary key,

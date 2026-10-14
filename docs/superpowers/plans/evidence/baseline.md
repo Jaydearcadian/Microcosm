@@ -186,5 +186,41 @@ Following the removal of unsafe server-signed consumer execution, establishing A
 - **Live Privy Cloud Credential Verification:** **NOT RUN** — RFC 7515/7519 compliant ES256 key pairs via `jose` and `@privy-io/node` verifier used locally; live JWKS endpoint gated behind production credentials.
 - **Live Arc Mainnet / Testnet RPC Transactions:** **NOT RUN** — Synthetic JSON-RPC mocks used locally; live chain submission gated for Plan 3.
 
+## 9. Security Review, Release Gates G0 & G1, and Reviewer Remediation (Plan 1 Task 9)
 
+**Date:** 2026-10-14  
+Following the comprehensive adversarial authorization review, cryptographic identity verification, formal independent code review, and full remediation of reviewer findings:
 
+### 1. Verification Gate Suite
+- **`npm ci`**: **LOCAL_PASS** (clean dependency tree, 0 audit vulnerabilities).
+- **`npm run typecheck`**: **LOCAL_PASS** (0 errors across root, apps, packages, and Next.js web application).
+- **`npm test`**: **LOCAL_PASS** (**117 passing, 0 failing**, duration ~9.3s across all unit, integration, and PostgreSQL concurrency suites).
+- **`npm run check:api-runtime`**: **LOCAL_PASS** (PostgreSQL connected, Arc RPC connected at block `0x4cef52`, Privy configured).
+- **`npm run db:apply-schema`**: **LOCAL_PASS** (Schema applied cleanly to PostgreSQL 16.15 `microcosm_test`).
+- **`npm run build --workspace=@mcosm/web`**: **LOCAL_PASS** (Next.js production build succeeded; static routes `/` and `/_not-found` generated cleanly).
+
+### 2. Independent Code Review & Remediations
+An independent Senior Security Code Reviewer audited commit range `df97ff5..27fd055` against release gates G0 and G1. All reviewer findings were fully remediated and verified:
+- **Critical 1 (Fail-Closed Confirmation):** `/v1/payments/:id/confirm` now strictly fails closed with 503 `confirmer_unavailable` if `app.confirmer` is unconfigured, and 400 `missing_tx_hash` if the payment lacks a transaction hash. In `apps/api/src/index.ts`, `confirmer` defaults to `createArcSettlementConfirmer({ rpcUrl: process.env.ARC_TESTNET_RPC_URL })`. Verified with dedicated unit tests.
+- **Critical 2 (PostgreSQL Payment JSONB Synchronization):** In `packages/db/src/postgres.ts`, `updatePaymentTransition` was updated with `jsonb_set` to atomically update `status` and `txHash` within `payment_data` alongside table columns. Furthermore, `loadAppState`, `getPayment`, and `listPayments` overlay SQL column values to prevent desynchronization upon clean reload. Verified in `packages/db/test/postgres-concurrency.test.ts`.
+- **Important 3 (Space-Scoped Recipient Lookup Keys):** Dropped global `recipients.lookup_key` unique constraint in `schema.sql` and replaced it with `recipients_space_lookup_key_idx on recipients(coalesce(space_id, 'global'), lookup_key)`, allowing different spaces to use identical lookup keys without collisions. Verified in PostgreSQL concurrency test suite.
+- **Important 4 (Multi-User Shared Emails):** Dropped `users.email` unique constraint in `schema.sql` and replaced with an index `users_email_idx`, ensuring distinct external Privy subjects sharing an email address never trigger 500 internal server errors. Verified in PostgreSQL concurrency test suite.
+- **Minor 5 (Recursive Idempotency Key Hashing):** Implemented recursive `canonicalizeJson` helper in `apps/api/src/dispatcher.ts` to guarantee deeply deterministic canonical JSON serialization for idempotency request hashing.
+
+### 3. Release Gate Verification
+- **Gate G0 (Identity & Tenant Authorization): CLOSED / PASS**
+  - Multi-tenant isolation verified across all resources: spaces, recipients, envelopes, intents, payments, wallets, and audit activity.
+  - Cross-tenant lookups and mutations return non-leaking 404s (`space_not_found`, `recipient_not_found`, `envelope_not_found`, `intent_not_found`, `payment_not_found`).
+  - Caller-spoofed ownership fields (`spaceId`, `ownerUserId`) are overridden by server-verified session claims.
+  - Nested cross-space resource references are blocked.
+  - Viewer role mutation restrictions enforced across all mutating routes (403 `forbidden`).
+  - Space membership revocation immediately terminates access (403 `forbidden`).
+  - Identity continuity preserved: fresh sessions resolve to identical canonical principal; email changes preserve principal ID; no silent principal merging on matching emails.
+  - Cryptographic wallet linking strictly gated via EIP-191 signatures with single-use atomic challenge consumption.
+  - Database queries tenant-scoped at the repository layer (`getEnvelope`, `listEnvelopes`, `getIntent`, `listIntents`, `getPayment`, `listPayments`, `listAuditEvents`, `listRecipients`).
+- **Gate G1 (Consumer Settlement Safety): CLOSED / PASS**
+  - Server-held private keys are strictly blocked for consumer execution (403 `server_signing_disallowed`).
+  - Client transaction preparation generates zero-value, ERC20-calldata bound strictly to approved intents.
+  - Submission only marks status `"submitted"`, NEVER `"confirmed"`.
+  - Payment confirmation requires independent, verified onchain receipts from an active confirmer (`confirmer_unavailable` 503 fail-closed; `unconfirmed_transaction` 409 rejection; 200 upon valid receipt).
+  - Duplicate or conflicting transaction hashes are strictly rejected with 409 `duplicate_submission`.

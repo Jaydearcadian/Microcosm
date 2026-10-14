@@ -839,3 +839,104 @@ test("PostgreSQL 16: durable worker jobs survive restart and concurrent workers 
     }
   }
 });
+
+test("PostgreSQL 16: Reviewer remediations - payment JSONB sync, multi-user emails, and space-scoped lookup keys", async () => {
+  const client = await createNodePostgresClient({ connectionString });
+  try {
+    await applyPostgresSchema(client);
+    const appRepo = createPostgresAppRepository({ client });
+    const identityRepo = createPostgresIdentityRepository({ client });
+    const suffix = randomSuffix();
+
+    // 1. Multi-user shared email test (Important 4)
+    const sharedEmail = `shared_${suffix}@example.com`;
+    await identityRepo.upsertUser({
+      id: `usr_a_${suffix}`,
+      privyUserId: `did:privy:a_${suffix}`,
+      email: sharedEmail
+    });
+    // Distinct user with same email must succeed without 500 or unique constraint error
+    await identityRepo.upsertUser({
+      id: `usr_b_${suffix}`,
+      privyUserId: `did:privy:b_${suffix}`,
+      email: sharedEmail
+    });
+
+    // 2. Space-scoped lookup key test (Important 3)
+    const sharedLookupKey = `vendor_${suffix}@example.com`;
+    const spaceA = `spc_a_${suffix}`;
+    const spaceB = `spc_b_${suffix}`;
+    await identityRepo.upsertRecipient({
+      id: `rcp_a_${suffix}`,
+      lookupKey: sharedLookupKey,
+      spaceId: spaceA,
+      ownerType: "external",
+      claimStatus: "claimed"
+    });
+    // Distinct recipient in different space with same lookupKey must succeed
+    await identityRepo.upsertRecipient({
+      id: `rcp_b_${suffix}`,
+      lookupKey: sharedLookupKey,
+      spaceId: spaceB,
+      ownerType: "external",
+      claimStatus: "claimed"
+    });
+
+    // 3. Payment JSONB and column synchronization test (Critical 2)
+    const paymentId = `pay_jsonb_${suffix}`;
+    const testTxHash = `0x${suffix.padEnd(64, "0")}`;
+    await appRepo.upsertPaymentState({
+      payment: {
+        id: paymentId,
+        intentId: `int_${suffix}`,
+        recipientId: `rcp_a_${suffix}`,
+        spaceId: spaceA,
+        asset: "USDC",
+        amount: "100",
+        status: "submitted"
+      },
+      settlement: {
+        chain: "arc",
+        mode: "direct",
+        paymentId,
+        asset: "USDC",
+        amount: "100",
+        destination: "0x1111111111111111111111111111111111111111"
+      }
+    });
+
+    // Transition via updatePaymentTransition
+    const transitioned = await appRepo.updatePaymentTransition!(
+      paymentId,
+      "submitted",
+      "confirmed",
+      testTxHash
+    );
+    assert.equal(transitioned, true);
+
+    // Verify row column and JSONB column are BOTH synchronized
+    const rawRow = await client.query(
+      `select status, tx_hash, payment_data from payments where id = $1`,
+      [paymentId]
+    );
+    assert.equal(rawRow.rows[0]!.status, "confirmed");
+    assert.equal(rawRow.rows[0]!.tx_hash, testTxHash);
+    const parsedJsonb = typeof rawRow.rows[0]!.payment_data === "string"
+      ? JSON.parse(rawRow.rows[0]!.payment_data)
+      : rawRow.rows[0]!.payment_data;
+    assert.equal(parsedJsonb.status, "confirmed");
+    assert.equal(parsedJsonb.txHash, testTxHash);
+
+    // Verify getPayment and listPayments and loadAppState return synchronized state
+    const retrieved = await appRepo.getPayment!(paymentId, spaceA);
+    assert.equal(retrieved?.payment.status, "confirmed");
+    assert.equal(retrieved?.payment.txHash, testTxHash);
+
+    const reloaded = await appRepo.loadAppState();
+    const reloadedPayment = reloaded.payments.find((p) => p.payment.id === paymentId);
+    assert.equal(reloadedPayment?.payment.status, "confirmed");
+    assert.equal(reloadedPayment?.payment.txHash, testTxHash);
+  } finally {
+    await client.close?.();
+  }
+});

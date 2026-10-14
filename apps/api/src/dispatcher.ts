@@ -136,6 +136,21 @@ export const readJsonBody = async (
   }
 };
 
+export const canonicalizeJson = (value: unknown): unknown => {
+  if (value === null || typeof value !== "object") {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map(canonicalizeJson);
+  }
+  const sortedKeys = Object.keys(value as Record<string, unknown>).sort();
+  const result: Record<string, unknown> = {};
+  for (const key of sortedKeys) {
+    result[key] = canonicalizeJson((value as Record<string, unknown>)[key]);
+  }
+  return result;
+};
+
 type RouteDefinition = {
   pattern: RegExp;
   allowedMethods: string[];
@@ -1227,16 +1242,32 @@ export const routeTable: RouteDefinition[] = [
         });
       }
 
-      if (app.confirmer && payment.txHash) {
-        const confirmation = await app.confirmer(payment.txHash);
-        if (!confirmation.confirmed) {
-          return sendJson(response, 409, {
-            error: "unconfirmed_transaction",
-            code: "unconfirmed_transaction",
-            message: "Transaction receipt has not been confirmed onchain",
-            requestId
-          });
-        }
+      if (!payment.txHash) {
+        return sendJson(response, 400, {
+          error: "missing_tx_hash",
+          code: "missing_tx_hash",
+          message: "Payment does not have a transaction hash to confirm",
+          requestId
+        });
+      }
+
+      if (!app.confirmer) {
+        return sendJson(response, 503, {
+          error: "confirmer_unavailable",
+          code: "confirmer_unavailable",
+          message: "Onchain transaction confirmer is not configured or unavailable",
+          requestId
+        });
+      }
+
+      const confirmation = await app.confirmer(payment.txHash);
+      if (!confirmation.confirmed) {
+        return sendJson(response, 409, {
+          error: "unconfirmed_transaction",
+          code: "unconfirmed_transaction",
+          message: "Transaction receipt has not been confirmed onchain",
+          requestId
+        });
       }
 
       await app.payments.transitionStatus?.(
@@ -1457,7 +1488,7 @@ export const dispatchV1Request = async ({
 
   let requestHash: string | undefined;
   if (idempotencyKey && app.idempotency) {
-    const canonicalBody = JSON.stringify(body, Object.keys(body).sort());
+    const canonicalBody = JSON.stringify(canonicalizeJson(body));
     requestHash = createHash("sha256").update(canonicalBody).digest("hex");
     const existing = await app.idempotency.get(authContext.principal.id, pathname, idempotencyKey);
     if (existing) {

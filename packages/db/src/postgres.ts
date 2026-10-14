@@ -485,7 +485,7 @@ export const createPostgresAppRepository = ({
       client.query("select data from envelopes order by created_at asc"),
       client.query("select data from intents order by created_at asc"),
       client.query(
-        "select payment_data, settlement_data from payments order by created_at asc"
+        "select status, tx_hash, payment_data, settlement_data from payments order by created_at asc"
       ),
       client.query("select data from notifications order by created_at asc"),
       client.query("select data from settlements order by created_at asc"),
@@ -499,14 +499,23 @@ export const createPostgresAppRepository = ({
       intents: intents.rows.map((row) =>
         parseJsonColumn<PaymentIntentRecord>(row.data)
       ),
-      payments: payments.rows.map((row) => ({
-        payment: parseJsonColumn<PersistedPaymentState["payment"]>(
+      payments: payments.rows.map((row) => {
+        const payment = parseJsonColumn<PersistedPaymentState["payment"]>(
           row.payment_data
-        ),
-        settlement: parseJsonColumn<PersistedPaymentState["settlement"]>(
-          row.settlement_data
-        )
-      })),
+        );
+        if (row.status) {
+          payment.status = row.status as any;
+        }
+        if (row.tx_hash) {
+          payment.txHash = String(row.tx_hash);
+        }
+        return {
+          payment,
+          settlement: parseJsonColumn<PersistedPaymentState["settlement"]>(
+            row.settlement_data
+          )
+        };
+      }),
       notifications: notifications.rows.map((row) =>
         parseJsonColumn<NotificationEvent>(row.data)
       ),
@@ -591,6 +600,11 @@ export const createPostgresAppRepository = ({
       `update payments
        set status = $1,
            tx_hash = coalesce($2, tx_hash),
+           payment_data = jsonb_set(
+             jsonb_set(payment_data, '{status}', to_jsonb($1::text)),
+             '{txHash}',
+             case when $2 is not null then to_jsonb($2::text) else coalesce(payment_data->'txHash', 'null'::jsonb) end
+           ),
            updated_at = now()
        where id = $3 and status = $4
        returning id`,
@@ -893,24 +907,40 @@ export const createPostgresAppRepository = ({
   },
   async getPayment(id: string, spaceId: string): Promise<PersistedPaymentState | undefined> {
     const res = await client.query(
-      "select payment_data, settlement_data from payments where id = $1 and space_id = $2",
+      "select status, tx_hash, payment_data, settlement_data from payments where id = $1 and space_id = $2",
       [id, spaceId]
     );
     if (res.rows.length === 0) return undefined;
+    const payment = parseJsonColumn<PersistedPaymentState["payment"]>(res.rows[0]!.payment_data);
+    if (res.rows[0]!.status) {
+      payment.status = res.rows[0]!.status as any;
+    }
+    if (res.rows[0]!.tx_hash) {
+      payment.txHash = String(res.rows[0]!.tx_hash);
+    }
     return {
-      payment: parseJsonColumn<PersistedPaymentState["payment"]>(res.rows[0]!.payment_data),
+      payment,
       settlement: parseJsonColumn<PersistedPaymentState["settlement"]>(res.rows[0]!.settlement_data)
     };
   },
   async listPayments(spaceId: string): Promise<PersistedPaymentState[]> {
     const res = await client.query(
-      "select payment_data, settlement_data from payments where space_id = $1 order by created_at asc",
+      "select status, tx_hash, payment_data, settlement_data from payments where space_id = $1 order by created_at asc",
       [spaceId]
     );
-    return res.rows.map((row) => ({
-      payment: parseJsonColumn<PersistedPaymentState["payment"]>(row.payment_data),
-      settlement: parseJsonColumn<PersistedPaymentState["settlement"]>(row.settlement_data)
-    }));
+    return res.rows.map((row) => {
+      const payment = parseJsonColumn<PersistedPaymentState["payment"]>(row.payment_data);
+      if (row.status) {
+        payment.status = row.status as any;
+      }
+      if (row.tx_hash) {
+        payment.txHash = String(row.tx_hash);
+      }
+      return {
+        payment,
+        settlement: parseJsonColumn<PersistedPaymentState["settlement"]>(row.settlement_data)
+      };
+    });
   },
   async listAuditEvents(spaceId: string): Promise<AuditEvent[]> {
     const res = await client.query(
