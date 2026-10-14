@@ -45,10 +45,24 @@ export type AppState = {
   workerJobs: WorkerJob[];
 };
 
+export type IdempotencyRecord = {
+  key: string;
+  principalId: string;
+  route: string;
+  requestHash: string;
+  statusCode: number;
+  responseBody: unknown;
+  createdAt: string;
+};
+
 export type AppStateRepository = {
   loadAppState: () => Promise<AppState>;
   upsertEnvelope: (envelope: Envelope) => Promise<void>;
   upsertIntent: (intent: PaymentIntentRecord) => Promise<void>;
+  saveIntentWithAudit?: (
+    intent: PaymentIntentRecord,
+    auditEvent: AuditEvent
+  ) => Promise<void>;
   upsertPaymentState: (entry: PersistedPaymentState) => Promise<void>;
   updatePaymentTransition?: (
     paymentId: string,
@@ -61,6 +75,20 @@ export type AppStateRepository = {
   upsertLedgerEntry: (entry: LedgerEntry) => Promise<void>;
   upsertAuditEvent: (event: AuditEvent) => Promise<void>;
   upsertWorkerJob: (job: WorkerJob) => Promise<void>;
+  claimNextWorkerJob?: (
+    leaseOwner: string,
+    leaseTimeoutMs?: number
+  ) => Promise<WorkerJob | undefined>;
+  completeWorkerJob?: (
+    jobId: string,
+    result?: Record<string, unknown>
+  ) => Promise<void>;
+  getIdempotencyRecord?: (
+    principalId: string,
+    route: string,
+    key: string
+  ) => Promise<IdempotencyRecord | undefined>;
+  saveIdempotencyRecord?: (record: IdempotencyRecord) => Promise<void>;
 };
 
 export type PostgresAppRepository = IdentityRepository & AppStateRepository;
@@ -628,15 +656,76 @@ export const createPostgresAppRepository = ({
       ]
     );
   },
+  async saveIntentWithAudit(intent, auditEvent) {
+    const insertIntent = async (clientOrTx: SqlClient) => {
+      await clientOrTx.query(
+        `insert into intents (id, envelope_id, recipient_id, status, space_id, data)
+         values ($1, $2, $3, $4, $5, $6::jsonb)
+         on conflict (id) do update
+         set envelope_id = excluded.envelope_id,
+             recipient_id = excluded.recipient_id,
+             status = excluded.status,
+             space_id = excluded.space_id,
+             data = excluded.data,
+             updated_at = now()`,
+        [
+          intent.id,
+          intent.envelopeId,
+          intent.recipientId,
+          intent.status,
+          intent.spaceId ?? null,
+          JSON.stringify(intent)
+        ]
+      );
+    };
+
+    const insertAudit = async (clientOrTx: SqlClient) => {
+      await clientOrTx.query(
+        `insert into audit_events (id, actor_type, actor_id, event_type, object_type, object_id, space_id, data)
+         values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+         on conflict (id) do update
+         set actor_type = excluded.actor_type,
+             actor_id = excluded.actor_id,
+             event_type = excluded.event_type,
+             object_type = excluded.object_type,
+             object_id = excluded.object_id,
+             space_id = excluded.space_id,
+             data = excluded.data,
+             updated_at = now()`,
+        [
+          auditEvent.id,
+          auditEvent.actorType,
+          auditEvent.actorId,
+          auditEvent.eventType,
+          auditEvent.objectType,
+          auditEvent.objectId,
+          auditEvent.spaceId ?? null,
+          JSON.stringify(auditEvent)
+        ]
+      );
+    };
+
+    if (client.transaction) {
+      await client.transaction(async (tx) => {
+        await insertIntent(tx);
+        await insertAudit(tx);
+      });
+    } else {
+      await insertIntent(client);
+      await insertAudit(client);
+    }
+  },
   async upsertWorkerJob(job) {
     await client.query(
-      `insert into worker_jobs (id, job_type, payment_id, settlement_id, status, data)
-       values ($1, $2, $3, $4, $5, $6::jsonb)
+      `insert into worker_jobs (id, job_type, payment_id, settlement_id, status, lease_owner, leased_at, data)
+       values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
        on conflict (id) do update
        set job_type = excluded.job_type,
            payment_id = excluded.payment_id,
            settlement_id = excluded.settlement_id,
            status = excluded.status,
+           lease_owner = excluded.lease_owner,
+           leased_at = excluded.leased_at,
            data = excluded.data,
            updated_at = now()`,
       [
@@ -645,7 +734,101 @@ export const createPostgresAppRepository = ({
         job.paymentId,
         job.settlementId,
         job.status,
+        job.leaseOwner ?? null,
+        job.leasedAt ?? null,
         JSON.stringify(job)
+      ]
+    );
+  },
+  async claimNextWorkerJob(
+    leaseOwner: string,
+    leaseTimeoutMs = 5 * 60 * 1000
+  ): Promise<WorkerJob | undefined> {
+    const cutoff = new Date(Date.now() - leaseTimeoutMs).toISOString();
+    const now = new Date().toISOString();
+    const res = await client.query(
+      `with next_job as (
+         select id from worker_jobs
+         where status = 'queued'
+            or (status = 'processing' and (leased_at is null or leased_at < $1::timestamptz))
+         order by created_at asc
+         limit 1
+         for update skip locked
+       )
+       update worker_jobs
+       set status = 'processing',
+           lease_owner = $2,
+           leased_at = $3::timestamptz,
+           updated_at = now()
+       from next_job
+       where worker_jobs.id = next_job.id
+       returning worker_jobs.id, worker_jobs.job_type, worker_jobs.payment_id,
+                 worker_jobs.settlement_id, worker_jobs.status, worker_jobs.lease_owner,
+                 worker_jobs.leased_at, worker_jobs.data`,
+      [cutoff, leaseOwner, now]
+    );
+    if (res.rows.length === 0) return undefined;
+    const row = res.rows[0]!;
+    return {
+      id: String(row.id),
+      type: row.job_type as "settlement.execute",
+      paymentId: String(row.payment_id),
+      settlementId: String(row.settlement_id),
+      status: "processing",
+      leaseOwner: String(row.lease_owner),
+      leasedAt: new Date(row.leased_at as string).toISOString()
+    };
+  },
+  async completeWorkerJob(jobId: string, result?: Record<string, unknown>): Promise<void> {
+    await client.query(
+      `update worker_jobs
+       set status = 'completed',
+           lease_owner = null,
+           leased_at = null,
+           data = data || $1::jsonb,
+           updated_at = now()
+       where id = $2`,
+      [JSON.stringify({ result: result ?? {} }), jobId]
+    );
+  },
+  async getIdempotencyRecord(
+    principalId: string,
+    route: string,
+    key: string
+  ): Promise<IdempotencyRecord | undefined> {
+    const res = await client.query(
+      `select key, principal_id, route, request_hash, status_code, response_body, created_at
+       from idempotency_keys
+       where principal_id = $1 and route = $2 and key = $3`,
+      [principalId, route, key]
+    );
+    if (res.rows.length === 0) return undefined;
+    const row = res.rows[0]!;
+    return {
+      key: String(row.key),
+      principalId: String(row.principal_id),
+      route: String(row.route),
+      requestHash: String(row.request_hash),
+      statusCode: Number(row.status_code),
+      responseBody: parseJsonColumn(row.response_body),
+      createdAt: new Date(row.created_at as string).toISOString()
+    };
+  },
+  async saveIdempotencyRecord(record: IdempotencyRecord): Promise<void> {
+    await client.query(
+      `insert into idempotency_keys (key, principal_id, route, request_hash, status_code, response_body)
+       values ($1, $2, $3, $4, $5, $6::jsonb)
+       on conflict (principal_id, route, key) do update
+       set request_hash = excluded.request_hash,
+           status_code = excluded.status_code,
+           response_body = excluded.response_body`,
+      [
+        record.key,
+        record.principalId,
+        record.route,
+        record.requestHash,
+        record.statusCode,
+        JSON.stringify(record.responseBody)
       ]
     );
   }

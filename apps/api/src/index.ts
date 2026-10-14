@@ -35,7 +35,8 @@ import {
   createNodePostgresClient,
   createPostgresAppRepository,
   createPostgresSpaceService,
-  type AppStateRepository
+  type AppStateRepository,
+  type IdempotencyRecord
 } from "../../../packages/db/src/index.ts";
 import {
   createPrivyAdapter,
@@ -126,6 +127,7 @@ export const createApiApp = (
     repository: options.identity?.repository
   });
   const spaces = options.spaces ?? createSpaceService();
+  const inMemoryIdempotency = new Map<string, IdempotencyRecord>();
   const notifications = createNotificationService(notificationOptions);
   const arcClient =
     settlementOptions.privateKey &&
@@ -251,6 +253,7 @@ export const createApiApp = (
           eventType: "intent.created",
           objectType: "intent",
           objectId: result.intent.id,
+          spaceId: result.intent.spaceId,
           payload: { status: result.intent.status }
         });
         persist();
@@ -285,6 +288,21 @@ export const createApiApp = (
         return result;
       },
       get: payments.get,
+      update: (paymentId: string, updates: Partial<Parameters<typeof payments.update>[1]>) => {
+        const payment = payments.update(paymentId, updates);
+        persist();
+        return payment;
+      },
+      transitionStatus: (
+        paymentId: string,
+        expectedStatus: Parameters<typeof payments.transitionStatus>[1],
+        newStatus: Parameters<typeof payments.transitionStatus>[2],
+        extra?: Parameters<typeof payments.transitionStatus>[3]
+      ) => {
+        const payment = payments.transitionStatus(paymentId, expectedStatus, newStatus, extra);
+        persist();
+        return payment;
+      },
       execute(paymentId: string) {
         const result = payments.execute(paymentId);
         settlements.markSettled(paymentId, result);
@@ -364,7 +382,12 @@ export const createApiApp = (
     },
     audit: {
       get: audit.get,
-      list: audit.list
+      list: audit.list,
+      record: (event: Parameters<typeof audit.record>[0]) => {
+        const recorded = audit.record(event);
+        persist();
+        return recorded;
+      }
     },
     settlements: {
       get: settlements.get,
@@ -460,6 +483,24 @@ export const createApiApp = (
         });
         persist();
         return processed;
+      }
+    },
+    idempotency: {
+      async get(principalId: string, route: string, key: string) {
+        if (options.identity?.repository?.getIdempotencyRecord) {
+          return options.identity.repository.getIdempotencyRecord(principalId, route, key);
+        }
+        return inMemoryIdempotency.get(`${principalId}:${route}:${key}`);
+      },
+      async save(record: IdempotencyRecord) {
+        if (options.identity?.repository?.saveIdempotencyRecord) {
+          await options.identity.repository.saveIdempotencyRecord(record);
+          return;
+        }
+        inMemoryIdempotency.set(
+          `${record.principalId}:${record.route}:${record.key}`,
+          structuredClone(record)
+        );
       }
     },
     spaces,
@@ -612,8 +653,18 @@ export const createApiAppAsync = async (
     intents: {
       create: async (input: Parameters<typeof app.intents.create>[0]) => {
         const result = app.intents.create(input);
-        await repository.upsertIntent?.(result.intent);
-        await syncAudit();
+        if (repository?.saveIntentWithAudit) {
+          const auditEvent = app.audit.list().find((e) => e.objectId === result.intent.id);
+          if (auditEvent) {
+            await repository.saveIntentWithAudit(result.intent, auditEvent);
+          } else {
+            await repository.upsertIntent?.(result.intent);
+            await syncAudit();
+          }
+        } else {
+          await repository?.upsertIntent?.(result.intent);
+          await syncAudit();
+        }
         return result;
       },
       get: async (intentId: string) => app.intents.get(intentId),
@@ -633,6 +684,38 @@ export const createApiAppAsync = async (
         return result;
       },
       get: async (paymentId: string) => app.payments.get(paymentId),
+      update: async (paymentId: string, updates: Partial<Parameters<typeof app.payments.update>[1]>) => {
+        const payment = app.payments.update(paymentId, updates);
+        const settlement = app.settlements.get(paymentId);
+        if (settlement && repository?.upsertPaymentState) {
+          await repository.upsertPaymentState({
+            payment,
+            settlement: settlement as any
+          });
+        }
+        return payment;
+      },
+      transitionStatus: async (
+        paymentId: string,
+        expectedStatus: Parameters<typeof app.payments.transitionStatus>[1],
+        newStatus: Parameters<typeof app.payments.transitionStatus>[2],
+        extra?: Parameters<typeof app.payments.transitionStatus>[3]
+      ) => {
+        const payment = app.payments.transitionStatus(paymentId, expectedStatus, newStatus, extra);
+        if (repository?.updatePaymentTransition) {
+          const exp = Array.isArray(expectedStatus) ? expectedStatus[0]! : expectedStatus;
+          await repository.updatePaymentTransition(paymentId, exp, newStatus, extra?.txHash);
+        } else if (repository?.upsertPaymentState) {
+          const settlement = app.settlements.get(paymentId);
+          if (settlement) {
+            await repository.upsertPaymentState({
+              payment,
+              settlement: settlement as any
+            });
+          }
+        }
+        return payment;
+      },
       execute: async (paymentId: string) => {
         const result = app.payments.execute(paymentId);
         await repository.upsertPaymentState?.({
@@ -671,7 +754,12 @@ export const createApiAppAsync = async (
     },
     audit: {
       get: async (eventId: string) => app.audit.get(eventId),
-      list: async () => app.audit.list()
+      list: async () => app.audit.list(),
+      record: async (event: Parameters<typeof app.audit.record>[0]) => {
+        const recorded = app.audit.record(event);
+        await syncAudit();
+        return recorded;
+      }
     },
     settlements: {
       get: async (paymentId: string) => app.settlements.get(paymentId),

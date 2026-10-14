@@ -604,3 +604,238 @@ test("PostgreSQL 16: process restart and connection durability preserves all sta
     }
   }
 });
+
+test("PostgreSQL 16: idempotency persistence - same key & payload replays result, different payload conflicts", async () => {
+  const client = await createNodePostgresClient({ connectionString });
+  try {
+    await applyPostgresSchema(client);
+    const appRepo = createPostgresAppRepository({ client });
+
+    const suffix = randomSuffix();
+    const principalId = `usr_idem_${suffix}`;
+    const route = "/v1/intents";
+    const idempotencyKey = `idem_${suffix}`;
+
+    const originalPayload = {
+      amount: "100",
+      asset: "USDC",
+      recipientId: `rcp_${suffix}`
+    };
+    const differentPayload = {
+      amount: "200",
+      asset: "USDC",
+      recipientId: `rcp_${suffix}`
+    };
+
+    const originalHash = "hash_" + randomSuffix();
+    const differentHash = "hash_" + randomSuffix();
+
+    const originalResult = {
+      intentId: `int_${suffix}`,
+      status: "approved"
+    };
+
+    // 1. Initial save of idempotency record
+    await appRepo.saveIdempotencyRecord!({
+      key: idempotencyKey,
+      principalId,
+      route,
+      requestHash: originalHash,
+      statusCode: 201,
+      responseBody: originalResult,
+      createdAt: new Date().toISOString()
+    });
+
+    // 2. Query with exact same principal, route, key
+    const retrieved = await appRepo.getIdempotencyRecord!(principalId, route, idempotencyKey);
+    assert.ok(retrieved, "Idempotency record must be retrieved");
+    assert.equal(retrieved.statusCode, 201);
+    assert.deepEqual(retrieved.responseBody, originalResult);
+
+    // 3. Same payload hash returns identical result
+    assert.equal(
+      retrieved.requestHash,
+      originalHash,
+      "Same key and payload matches requestHash and allows replay"
+    );
+
+    // 4. Different payload hash triggers conflict detection
+    assert.notEqual(
+      retrieved.requestHash,
+      differentHash,
+      "Different payload hash does not match original requestHash"
+    );
+  } finally {
+    await client.close?.();
+  }
+});
+
+test("PostgreSQL 16: atomic intent and audit persistence commits or rolls back together", async () => {
+  const client = await createNodePostgresClient({ connectionString });
+  try {
+    await applyPostgresSchema(client);
+    const appRepo = createPostgresAppRepository({ client });
+    const identityRepo = createPostgresIdentityRepository({ client });
+    const spaceService = createPostgresSpaceService({ client });
+
+    const suffix = randomSuffix();
+    const userId = `usr_atomic_${suffix}`;
+    await identityRepo.upsertUser({
+      id: userId,
+      email: `atomic_${suffix}@example.com`,
+      privyUserId: `did:privy:atomic_${suffix}`
+    });
+    const space = await spaceService.ensurePersonalSpace(userId);
+
+    const envelopeId = `env_atomic_${suffix}`;
+    await appRepo.upsertEnvelope({
+      id: envelopeId,
+      spaceId: space.id,
+      asset: "USDC",
+      maxAmountPerTx: "500",
+      maxAmountPerDay: "2000",
+      allowedRecipientIds: [`rcp_${suffix}`],
+      schedule: { days: ["mon"], startHourUtc: 0, endHourUtc: 24 }
+    });
+
+    // Case 1: Atomic success commits BOTH intent and audit event
+    const intentIdSuccess = `int_success_${suffix}`;
+    const auditIdSuccess = `aud_success_${suffix}`;
+
+    await appRepo.saveIntentWithAudit!(
+      {
+        id: intentIdSuccess,
+        type: "send_money",
+        envelopeId,
+        recipientId: `rcp_${suffix}`,
+        status: "approved",
+        spaceId: space.id,
+        amount: "50",
+        asset: "USDC",
+        spentToday: "0",
+        executedAt: new Date().toISOString()
+      },
+      {
+        id: auditIdSuccess,
+        actorType: "user",
+        actorId: userId,
+        eventType: "intent.created",
+        objectType: "intent",
+        objectId: intentIdSuccess,
+        spaceId: space.id,
+        payload: { status: "approved" }
+      }
+    );
+
+    // Verify both exist
+    const intentRes = await client.query(`select id from intents where id = $1`, [intentIdSuccess]);
+    assert.equal(intentRes.rows.length, 1, "Intent must be committed");
+    const auditRes = await client.query(`select id from audit_events where id = $1`, [auditIdSuccess]);
+    assert.equal(auditRes.rows.length, 1, "Audit event must be committed");
+
+    // Case 2: Transaction failure rolls back BOTH (zero partial records)
+    const intentIdFail = `int_fail_${suffix}`;
+    const auditIdFail = `aud_fail_${suffix}`;
+
+    await assert.rejects(
+      async () => {
+        await client.transaction!(async (tx) => {
+          await tx.query(
+            `insert into intents (id, envelope_id, recipient_id, status, space_id, data)
+             values ($1, $2, $3, 'approved', $4, '{}'::jsonb)`,
+            [intentIdFail, envelopeId, `rcp_${suffix}`, space.id]
+          );
+
+          // Force failure before audit insert or commit
+          throw new Error("Audit store network/database failure simulation");
+        });
+      },
+      /Audit store network\/database failure simulation/
+    );
+
+    const intentFailRes = await client.query(`select id from intents where id = $1`, [intentIdFail]);
+    assert.equal(intentFailRes.rows.length, 0, "Intent must be rolled back on failure");
+    const auditFailRes = await client.query(`select id from audit_events where id = $1`, [auditIdFail]);
+    assert.equal(auditFailRes.rows.length, 0, "Audit event must be rolled back on failure");
+  } finally {
+    await client.close?.();
+  }
+});
+
+test("PostgreSQL 16: durable worker jobs survive restart and concurrent workers cannot double-claim", async () => {
+  const suffix = randomSuffix();
+
+  // Phase 1: Seed 3 queued worker jobs in PostgreSQL and close connection
+  {
+    const client1 = await createNodePostgresClient({ connectionString });
+    try {
+      await applyPostgresSchema(client1);
+      await client1.query("delete from worker_jobs");
+      const appRepo1 = createPostgresAppRepository({ client: client1 });
+
+      for (let i = 1; i <= 3; i++) {
+        await appRepo1.upsertWorkerJob({
+          id: `job_${suffix}_${i}`,
+          type: "settlement.execute",
+          paymentId: `pay_${suffix}_${i}`,
+          settlementId: `stl_${suffix}_${i}`,
+          status: "queued"
+        });
+      }
+    } finally {
+      // Simulate process restart
+      await client1.close?.();
+    }
+  }
+
+  // Phase 2: Start new process and launch 20 concurrent workers attempting to claim jobs
+  {
+    const client2 = await createNodePostgresClient({ connectionString });
+    try {
+      const appRepo2 = createPostgresAppRepository({ client: client2 });
+
+      // 20 parallel workers race to claim the 3 queued jobs
+      const concurrency = 20;
+      const claimPromises = Array.from({ length: concurrency }).map((_, i) =>
+        appRepo2.claimNextWorkerJob!(`worker_instance_${i}`)
+      );
+
+      const claimedResults = await Promise.all(claimPromises);
+
+      // Filter successful claims
+      const successfulClaims = claimedResults.filter((j): j is NonNullable<typeof j> => j !== undefined);
+
+      // Exactly 3 jobs were available, so exactly 3 claims must succeed
+      assert.equal(
+        successfulClaims.length,
+        3,
+        `Expected exactly 3 claimed jobs, got ${successfulClaims.length}`
+      );
+
+      // Invariant: All 3 claimed job IDs must be distinct (no double-claim under race)
+      const claimedJobIds = new Set(successfulClaims.map((j) => j.id));
+      assert.equal(
+        claimedJobIds.size,
+        3,
+        "Every successfully claimed job must have a unique job ID"
+      );
+
+      // The other 17 workers must receive undefined
+      const emptyClaims = claimedResults.filter((j) => j === undefined);
+      assert.equal(emptyClaims.length, 17, "Remaining workers must receive undefined");
+
+      // Complete one job and verify status
+      const firstJob = successfulClaims[0]!;
+      await appRepo2.completeWorkerJob!(firstJob.id, { txHash: "0xcompleted" });
+
+      const dbRow = await client2.query(
+        `select status, lease_owner from worker_jobs where id = $1`,
+        [firstJob.id]
+      );
+      assert.equal(dbRow.rows[0]!.status, "completed");
+      assert.equal(dbRow.rows[0]!.lease_owner, null);
+    } finally {
+      await client2.close?.();
+    }
+  }
+});

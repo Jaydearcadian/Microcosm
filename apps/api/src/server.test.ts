@@ -15,7 +15,8 @@ test("api server handles recipient resolution and payment flow endpoints", async
           claimStatus: "claimed"
         }
       }
-    }
+    },
+    allowLegacyExecution: true
   });
 
   await server.start();
@@ -59,7 +60,7 @@ test("api server handles recipient resolution and payment flow endpoints", async
 });
 
 test("api server exposes health, listing, and async execution endpoints", async () => {
-  const server = createApiServer();
+  const server = createApiServer({ allowLegacyExecution: true });
 
   await server.start();
 
@@ -140,7 +141,7 @@ test("api server exposes healthz and readyz endpoints", async () => {
   process.env.PRIVY_APP_ID = "privy-app-id";
   process.env.PRIVY_APP_SECRET = "privy-app-secret";
   process.env.ARC_TESTNET_RPC_URL = "https://rpc.testnet.arc.network";
-  process.env.ARC_SETTLEMENT_PRIVATE_KEY = "0xabc";
+  delete process.env.ARC_SETTLEMENT_PRIVATE_KEY;
   globalThis.fetch = (async (input, init) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     if (url.startsWith(server.url)) {

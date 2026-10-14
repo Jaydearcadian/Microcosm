@@ -174,12 +174,11 @@ test("async api app persists envelopes, intents, payments, and notifications thr
   assert.equal(saved.workerJobs.length, 0);
 });
 
-test("getApiRuntimeConfig requires database, privy, and settlement env", () => {
+test("getApiRuntimeConfig requires database and privy env, and starts without ARC_SETTLEMENT_PRIVATE_KEY", () => {
   const config = getApiRuntimeConfig({
     DATABASE_URL: "postgres://postgres:postgres@127.0.0.1:5432/microcosm",
     PRIVY_APP_ID: "privy-app-id",
     PRIVY_APP_SECRET: "privy-app-secret",
-    ARC_SETTLEMENT_PRIVATE_KEY: "0xabc",
     ARC_SETTLEMENT_ROUTER_ADDRESS: "0x7777777777777777777777777777777777777777",
     ARC_CLAIM_ESCROW_ADDRESS: "0x8888888888888888888888888888888888888888",
     PORT: "4010"
@@ -187,6 +186,7 @@ test("getApiRuntimeConfig requires database, privy, and settlement env", () => {
 
   assert.equal(config.port, 4010);
   assert.equal(config.databaseUrl, "postgres://postgres:postgres@127.0.0.1:5432/microcosm");
+  assert.equal(config.arcSettlementPrivateKey, undefined);
   assert.equal(
     config.arcContracts.settlementRouter,
     "0x7777777777777777777777777777777777777777"

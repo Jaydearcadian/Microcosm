@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import {
   AuthError,
   authenticateAndAuthorize,
@@ -349,6 +349,7 @@ export const routeTable: RouteDefinition[] = [
         };
         const recipient = recipientService.create
           ? recipientService.create({
+              id: (body.id as string) || undefined,
               spaceId: authContext.space.id,
               ownerUserId: authContext.principal.id,
               recipientType,
@@ -508,32 +509,67 @@ export const routeTable: RouteDefinition[] = [
         return sendNotFound(response, "intent", requestId);
       }
       const intent = await app.intents.get(intentId);
-      if (!intent || (intent.spaceId && intent.spaceId !== authContext.space.id)) {
+      if (
+        !intent ||
+        (intent.spaceId && intent.spaceId !== authContext.space.id) ||
+        (intent.ownerUserId && intent.ownerUserId !== authContext.principal.id)
+      ) {
         return sendNotFound(response, "intent", requestId);
       }
 
+      if (intent.status !== "approved") {
+        return sendJson(response, 400, {
+          error: "intent_not_approved",
+          code: "intent_not_approved",
+          message: "Cannot prepare payment for an unapproved intent",
+          requestId
+        });
+      }
+
       const senderAddress = (
-        authContext.principal.walletAddress || "0x0000000000000000000000000000000000000001"
+        authContext.principal.walletAddress ||
+        (body.senderAddress as string) ||
+        "0x0000000000000000000000000000000000000001"
       ).toLowerCase() as `0x${string}`;
+
+      let recipientAddress = intent.recipientAddress;
+      if (!recipientAddress && intent.recipientId) {
+        const rcp = await app.recipients.get(intent.recipientId);
+        if (rcp && rcp.walletAddress) {
+          recipientAddress = rcp.walletAddress;
+        }
+      }
       const to = (
-        intent.recipientAddress || "0x0000000000000000000000000000000000000002"
+        recipientAddress || "0x0000000000000000000000000000000000000002"
       ).toLowerCase() as `0x${string}`;
+
       const tokenAddress = (
         intent.tokenAddress || "0x3600000000000000000000000000000000000000"
       ).toLowerCase() as `0x${string}`;
+
       const amountBaseUnits =
         intent.amountBaseUnits || `${Math.round(Number(intent.amount || "0") * 1_000_000)}`;
+
+      // Generate calldata: ERC-20 transfer(address to, uint256 value)
+      const recipientClean = to.replace(/^0x/, "").padStart(64, "0");
+      let amountHex = "0".repeat(64);
+      try {
+        amountHex = BigInt(amountBaseUnits).toString(16).padStart(64, "0");
+      } catch {
+        amountHex = "0".repeat(64);
+      }
+      const calldata = `0xa9059cbb${recipientClean}${amountHex}`;
 
       return sendJson(response, 200, {
         intentId: intent.id,
         senderAddress,
         to,
-        calldata: "0xa9059cbb" + "0".repeat(64),
+        calldata,
         value: "0" as const,
         chainId: intent.chainId || 5042,
         tokenAddress,
         amountBaseUnits,
-        expiresAt: new Date(Date.now() + 3600_000).toISOString()
+        expiresAt: intent.expiresAt || new Date(Date.now() + 3600_000).toISOString()
       });
     }
   },
@@ -543,23 +579,177 @@ export const routeTable: RouteDefinition[] = [
     pattern: /^\/v1\/payments\/submission$/,
     allowedMethods: ["POST"],
     handler: async ({ response, app, authContext, body, requestId }) => {
+      const txHash = body.txHash as string | undefined;
+      if (!txHash || typeof txHash !== "string" || !/^0x[a-fA-F0-9]{64}$/.test(txHash)) {
+        return sendJson(response, 400, {
+          error: "invalid_tx_hash",
+          code: "invalid_tx_hash",
+          message: "A valid 32-byte hexadecimal transaction hash prefixed with 0x is required",
+          requestId
+        });
+      }
+
       const paymentId = body.paymentId as string | undefined;
+      const intentId = body.intentId as string | undefined;
+
+      if (!paymentId && !intentId) {
+        return sendJson(response, 400, {
+          error: "missing_identifier",
+          code: "missing_identifier",
+          message: "Either paymentId or intentId is required for submission",
+          requestId
+        });
+      }
+
+      let payment: any;
       if (paymentId) {
-        const payment = await app.payments.get(paymentId);
-        if (!payment || (payment.spaceId && payment.spaceId !== authContext.space.id)) {
+        payment = await app.payments.get(paymentId);
+        if (
+          !payment ||
+          (payment.spaceId && payment.spaceId !== authContext.space.id) ||
+          (payment.ownerUserId && payment.ownerUserId !== authContext.principal.id)
+        ) {
           return sendNotFound(response, "payment", requestId);
         }
-        payment.txHash = body.txHash as string;
-        payment.status = "submitted";
       }
+
+      const effectiveIntentId = payment?.intentId ?? intentId;
+      if (effectiveIntentId) {
+        const intent = await app.intents.get(effectiveIntentId);
+        if (
+          !intent ||
+          (intent.spaceId && intent.spaceId !== authContext.space.id) ||
+          (intent.ownerUserId && intent.ownerUserId !== authContext.principal.id)
+        ) {
+          return sendNotFound(response, "intent", requestId);
+        }
+        if (intent.status !== "approved") {
+          return sendJson(response, 400, {
+            error: "intent_not_approved",
+            code: "intent_not_approved",
+            message: "Cannot submit payment for an unapproved intent",
+            requestId
+          });
+        }
+      }
+
+      // Check for global duplicate txHash across other payments
+      const allPayments = await app.payments.list();
+      const existingWithTx = allPayments.find(
+        (p) => p.txHash?.toLowerCase() === txHash.toLowerCase() && p.id !== payment?.id
+      );
+      if (existingWithTx) {
+        return sendJson(response, 409, {
+          error: "duplicate_submission",
+          code: "duplicate_submission",
+          message: "Transaction hash has already been submitted for another payment",
+          requestId
+        });
+      }
+
+      if (payment) {
+        if (payment.status === "submitted") {
+          if (payment.txHash?.toLowerCase() === txHash.toLowerCase()) {
+            return sendJson(response, 200, {
+              ok: true,
+              submission: {
+                paymentId: payment.id,
+                intentId: payment.intentId,
+                txHash,
+                chainId: body.chainId ?? payment.chainId ?? 5042,
+                senderAddress: body.senderAddress ?? payment.senderAddress,
+                status: "submitted"
+              }
+            });
+          }
+          return sendJson(response, 409, {
+            error: "duplicate_submission",
+            code: "duplicate_submission",
+            message: "Payment already submitted with different transaction hash",
+            requestId
+          });
+        }
+
+        if (payment.status === "confirmed" || payment.status === "settled") {
+          return sendJson(response, 409, {
+            error: "invalid_state_transition",
+            code: "invalid_state_transition",
+            message: "Cannot submit transaction for payment that has already settled",
+            requestId
+          });
+        }
+
+        if (payment.status !== "prepared" && payment.status !== "ready_for_settlement") {
+          return sendJson(response, 409, {
+            error: "invalid_state_transition",
+            code: "invalid_state_transition",
+            message: `Cannot submit payment in status '${payment.status}'`,
+            requestId
+          });
+        }
+
+        await app.payments.transitionStatus?.(
+          payment.id,
+          [payment.status],
+          "submitted",
+          { txHash }
+        ) ?? app.payments.update?.(payment.id, { status: "submitted", txHash });
+        payment.status = "submitted";
+        payment.txHash = txHash;
+      } else if (effectiveIntentId) {
+        const intent = await app.intents.get(effectiveIntentId);
+        let recipient: any;
+        if (intent?.recipientId) {
+          recipient = await app.recipients.get(intent.recipientId);
+        }
+        const created = await app.payments.create({
+          intentId: effectiveIntentId,
+          amount: intent?.amount || "0",
+          asset: intent?.asset || "USDC",
+          recipient: recipient ?? {
+            id: intent?.recipientId ?? "rcp_default",
+            ownerType: "external",
+            claimStatus: "claimed",
+            lookupKey: "default"
+          },
+          spaceId: authContext.space.id,
+          ownerUserId: authContext.principal.id,
+          senderAddress: (body.senderAddress as string) || authContext.principal.walletAddress,
+          recipientAddress: intent?.recipientAddress,
+          chainId: (body.chainId as number) || intent?.chainId || 5042,
+          tokenAddress: intent?.tokenAddress,
+          amountDecimal: intent?.amountDecimal || intent?.amount,
+          amountBaseUnits: intent?.amountBaseUnits,
+          status: "submitted",
+          txHash
+        });
+        payment = created.payment;
+      }
+
+      app.audit.record?.({
+        id: `aud_sub_${Date.now()}`,
+        actorType: "user",
+        actorId: authContext.principal.id,
+        eventType: "payment.submitted",
+        objectType: "payment",
+        objectId: payment?.id ?? effectiveIntentId,
+        spaceId: authContext.space.id,
+        payload: {
+          txHash,
+          intentId: effectiveIntentId,
+          status: "submitted"
+        }
+      });
+
       return sendJson(response, 200, {
         ok: true,
         submission: {
-          paymentId,
-          intentId: body.intentId,
-          txHash: body.txHash,
-          chainId: body.chainId,
-          senderAddress: body.senderAddress
+          paymentId: payment?.id,
+          intentId: effectiveIntentId,
+          txHash,
+          chainId: body.chainId ?? payment?.chainId ?? 5042,
+          senderAddress: body.senderAddress ?? payment?.senderAddress ?? authContext.principal.walletAddress,
+          status: "submitted"
         }
       });
     }
@@ -583,8 +773,21 @@ export const routeTable: RouteDefinition[] = [
           return sendNotFound(response, "intent", requestId);
         }
         const intent = await app.intents.get(intentId);
-        if (!intent || (intent.spaceId && intent.spaceId !== authContext.space.id)) {
+        if (
+          !intent ||
+          (intent.spaceId && intent.spaceId !== authContext.space.id) ||
+          (intent.ownerUserId && intent.ownerUserId !== authContext.principal.id)
+        ) {
           return sendNotFound(response, "intent", requestId);
+        }
+
+        if (intent.status !== "approved") {
+          return sendJson(response, 400, {
+            error: "intent_not_approved",
+            code: "intent_not_approved",
+            message: "Cannot create payment for an unapproved intent",
+            requestId
+          });
         }
 
         let recipient = body.recipient as any;
@@ -599,6 +802,7 @@ export const routeTable: RouteDefinition[] = [
           ...body,
           spaceId: authContext.space.id,
           ownerUserId: authContext.principal.id,
+          status: (body.status as any) || "prepared",
           recipient: recipient ?? {
             id: intent.recipientId ?? "rcp_default",
             ownerType: "external",
@@ -607,7 +811,7 @@ export const routeTable: RouteDefinition[] = [
           }
         };
 
-        const result = app.payments.create(paymentInput as never);
+        const result = await app.payments.create(paymentInput as never);
         return sendJson(response, 201, result);
       }
     }
@@ -620,19 +824,123 @@ export const routeTable: RouteDefinition[] = [
     handler: async ({ response, app, authContext, params, body, requestId }) => {
       const paymentId = params[0]!;
       const payment = await app.payments.get(paymentId);
-      if (!payment || (payment.spaceId && payment.spaceId !== authContext.space.id)) {
+      if (
+        !payment ||
+        (payment.spaceId && payment.spaceId !== authContext.space.id) ||
+        (payment.ownerUserId && payment.ownerUserId !== authContext.principal.id)
+      ) {
         return sendNotFound(response, "payment", requestId);
       }
-      payment.txHash = body.txHash as string;
+
+      const txHash = body.txHash as string | undefined;
+      if (!txHash || typeof txHash !== "string" || !/^0x[a-fA-F0-9]{64}$/.test(txHash)) {
+        return sendJson(response, 400, {
+          error: "invalid_tx_hash",
+          code: "invalid_tx_hash",
+          message: "A valid 32-byte hexadecimal transaction hash prefixed with 0x is required",
+          requestId
+        });
+      }
+
+      if (payment.intentId) {
+        const intent = await app.intents.get(payment.intentId);
+        if (intent && intent.status !== "approved") {
+          return sendJson(response, 400, {
+            error: "intent_not_approved",
+            code: "intent_not_approved",
+            message: "Associated intent is not approved",
+            requestId
+          });
+        }
+      }
+
+      // Check for global duplicate txHash across other payments
+      const allPayments = await app.payments.list();
+      const existingWithTx = allPayments.find(
+        (p) => p.txHash?.toLowerCase() === txHash.toLowerCase() && p.id !== payment.id
+      );
+      if (existingWithTx) {
+        return sendJson(response, 409, {
+          error: "duplicate_submission",
+          code: "duplicate_submission",
+          message: "Transaction hash has already been submitted for another payment",
+          requestId
+        });
+      }
+
+      if (payment.status === "submitted") {
+        if (payment.txHash?.toLowerCase() === txHash.toLowerCase()) {
+          return sendJson(response, 200, {
+            ok: true,
+            submission: {
+              paymentId,
+              intentId: payment.intentId,
+              txHash,
+              chainId: body.chainId ?? payment.chainId ?? 5042,
+              senderAddress: body.senderAddress ?? payment.senderAddress,
+              status: "submitted"
+            }
+          });
+        }
+        return sendJson(response, 409, {
+          error: "duplicate_submission",
+          code: "duplicate_submission",
+          message: "Payment already submitted with different transaction hash",
+          requestId
+        });
+      }
+
+      if (payment.status === "confirmed" || payment.status === "settled") {
+        return sendJson(response, 409, {
+          error: "invalid_state_transition",
+          code: "invalid_state_transition",
+          message: "Cannot submit transaction for payment that has already settled",
+          requestId
+        });
+      }
+
+      if (payment.status !== "prepared" && payment.status !== "ready_for_settlement") {
+        return sendJson(response, 409, {
+          error: "invalid_state_transition",
+          code: "invalid_state_transition",
+          message: `Cannot submit payment in status '${payment.status}'`,
+          requestId
+        });
+      }
+
+      await app.payments.transitionStatus?.(
+        paymentId,
+        [payment.status],
+        "submitted",
+        { txHash }
+      ) ?? app.payments.update?.(paymentId, { status: "submitted", txHash });
       payment.status = "submitted";
+      payment.txHash = txHash;
+
+      app.audit.record?.({
+        id: `aud_sub_${Date.now()}`,
+        actorType: "user",
+        actorId: authContext.principal.id,
+        eventType: "payment.submitted",
+        objectType: "payment",
+        objectId: paymentId,
+        spaceId: authContext.space.id,
+        payload: {
+          txHash,
+          intentId: payment.intentId,
+          status: "submitted"
+        }
+      });
+
       return sendJson(response, 200, {
         ok: true,
         submission: {
           paymentId,
           intentId: payment.intentId,
-          txHash: body.txHash,
-          chainId: body.chainId,
-          senderAddress: body.senderAddress
+          txHash,
+          chainId: body.chainId ?? payment.chainId ?? 5042,
+          senderAddress: body.senderAddress ?? payment.senderAddress,
+          status: "submitted"
         }
       });
     }
@@ -656,8 +964,12 @@ export const routeTable: RouteDefinition[] = [
           requestId
         });
       }
-      const executed = await app.payments.execute(paymentId);
-      return sendJson(response, 200, executed);
+      return sendJson(response, 403, {
+        error: "server_signing_disallowed",
+        code: "server_signing_disallowed",
+        message: "Server-side transaction signing is disallowed for consumer execution. Transactions must be executed via client-signed submissions bound to approved intents.",
+        requestId
+      });
     }
   },
 
@@ -679,8 +991,67 @@ export const routeTable: RouteDefinition[] = [
           requestId
         });
       }
-      const queued = await app.payments.executeAsync(paymentId);
-      return sendJson(response, 200, queued);
+      return sendJson(response, 403, {
+        error: "server_signing_disallowed",
+        code: "server_signing_disallowed",
+        message: "Server-side transaction signing is disallowed for consumer execution. Transactions must be executed via client-signed submissions bound to approved intents.",
+        requestId
+      });
+    }
+  },
+
+  // 20. /v1/payments/:id/confirm
+  {
+    pattern: /^\/v1\/payments\/([^/]+)\/confirm$/,
+    allowedMethods: ["POST"],
+    handler: async ({ response, app, authContext, params, requestId }) => {
+      const paymentId = params[0]!;
+      const payment = await app.payments.get(paymentId);
+      if (!payment || (payment.spaceId && payment.spaceId !== authContext.space.id)) {
+        return sendNotFound(response, "payment", requestId);
+      }
+      if (payment.status === "confirmed") {
+        return sendJson(response, 200, { ok: true, payment });
+      }
+      if (payment.status === "failed") {
+        return sendJson(response, 409, {
+          error: "invalid_state_transition",
+          code: "invalid_state_transition",
+          message: "Cannot confirm payment in failed state",
+          requestId
+        });
+      }
+      if (payment.status !== "submitted" && payment.status !== "confirming") {
+        return sendJson(response, 409, {
+          error: "invalid_state_transition",
+          code: "invalid_state_transition",
+          message: `Cannot confirm payment in status '${payment.status}'; must be 'submitted' or 'confirming'`,
+          requestId
+        });
+      }
+
+      await app.payments.transitionStatus?.(
+        paymentId,
+        [payment.status],
+        "confirmed"
+      ) ?? app.payments.update?.(paymentId, { status: "confirmed" });
+      payment.status = "confirmed";
+
+      app.audit.record?.({
+        id: `aud_conf_${Date.now()}`,
+        actorType: "system",
+        actorId: "confirmer",
+        eventType: "payment.confirmed",
+        objectType: "payment",
+        objectId: paymentId,
+        spaceId: authContext.space.id,
+        payload: {
+          txHash: payment.txHash,
+          status: "confirmed"
+        }
+      });
+
+      return sendJson(response, 200, { ok: true, payment });
     }
   },
 
@@ -866,7 +1237,58 @@ export const dispatchV1Request = async ({
     }
   }
 
-  // 8. Execute route handler
+  // 8. Idempotency handling for mutating requests
+  const idempotencyKey = (
+    getHeader(request, "idempotency-key") ||
+    (typeof body.idempotencyKey === "string" ? body.idempotencyKey : undefined)
+  ) as string | undefined;
+
+  let requestHash: string | undefined;
+  if (idempotencyKey && app.idempotency) {
+    const canonicalBody = JSON.stringify(body, Object.keys(body).sort());
+    requestHash = createHash("sha256").update(canonicalBody).digest("hex");
+    const existing = await app.idempotency.get(authContext.principal.id, pathname, idempotencyKey);
+    if (existing) {
+      if (existing.requestHash === requestHash) {
+        sendJson(response, existing.statusCode, existing.responseBody, {
+          "idempotency-replayed": "true"
+        });
+        return true;
+      }
+      sendJson(response, 409, {
+        error: "idempotency_conflict",
+        code: "idempotency_conflict",
+        message: "Idempotency key reused with different request payload",
+        requestId
+      });
+      return true;
+    }
+
+    const originalEnd = response.end.bind(response);
+    let captured = false;
+    response.end = function (chunk?: unknown, ...args: unknown[]) {
+      if (!captured && response.statusCode >= 200 && response.statusCode < 300 && chunk) {
+        captured = true;
+        try {
+          const parsed = JSON.parse(
+            Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk)
+          );
+          void app.idempotency?.save({
+            key: idempotencyKey,
+            principalId: authContext.principal.id,
+            route: pathname,
+            requestHash: requestHash!,
+            statusCode: response.statusCode,
+            responseBody: parsed,
+            createdAt: new Date().toISOString()
+          });
+        } catch {}
+      }
+      return (originalEnd as Function)(chunk, ...args);
+    };
+  }
+
+  // 9. Execute route handler
   try {
     await matchedRoute.handler({
       request,

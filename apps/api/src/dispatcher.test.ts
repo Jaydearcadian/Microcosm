@@ -260,6 +260,7 @@ test("Task 6: Centralized /v1 route dispatcher and tenant authorization", async 
         "content-type": "application/json"
       },
       body: JSON.stringify({
+        id: "rcp_alice_carol",
         recipientType: "wallet",
         displayLabel: "Carol",
         address: "0x2222222222222222222222222222222222222222"
@@ -507,6 +508,61 @@ test("Task 6: Centralized /v1 route dispatcher and tenant authorization", async 
     assert.equal(activityRes.status, 200);
     const activity = await activityRes.json();
     assert.ok(Array.isArray(activity.items));
+
+    // =========================================================================
+    // Gate 6: Idempotency persistence (same key+payload replays, different conflicts)
+    // =========================================================================
+    const idemKey = "idem_test_abc123";
+    const intentPayload = {
+      type: "send_money",
+      envelopeId: aliceEnv.id,
+      recipientId: aliceRcp.id,
+      amount: "15",
+      asset: "USDC",
+      idempotencyKey: idemKey
+    };
+
+    const firstPost = await fetch(`${server.url}/v1/intents`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${aliceToken}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(intentPayload)
+    });
+    assert.equal(firstPost.status, 201);
+    const firstResult = await firstPost.json();
+    assert.ok(firstResult.intent?.id);
+
+    // Replay with exact same payload and key
+    const replayPost = await fetch(`${server.url}/v1/intents`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${aliceToken}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(intentPayload)
+    });
+    assert.equal(replayPost.status, 201);
+    const replayResult = await replayPost.json();
+    assert.equal(replayResult.intent.id, firstResult.intent.id);
+    assert.equal(replayPost.headers.get("idempotency-replayed"), "true");
+
+    // Conflicting request with same key but different payload
+    const conflictPost = await fetch(`${server.url}/v1/intents`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${aliceToken}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        ...intentPayload,
+        amount: "99"
+      })
+    });
+    assert.equal(conflictPost.status, 409);
+    const conflictResult = await conflictPost.json();
+    assert.equal(conflictResult.error, "idempotency_conflict");
   } finally {
     await server.stop();
   }

@@ -133,6 +133,9 @@ Following the implementation of PostgreSQL schema enhancements (`packages/db/pos
   - **Atomic Payment State Machine & tx_hash Uniqueness Under Concurrency:** Two competing workers concurrently attempted status transition from `ready_for_settlement` to `submitted` with competing transaction hashes. Verified that exactly 1 worker succeeded, subsequent transitions from the obsolete state were rejected, and attempts to insert duplicate non-null `tx_hash` values triggered PostgreSQL unique constraint violation `23505`.
   - **Transaction Rollback & Atomicity:** Executed multi-statement user and space creation within `client.transaction(...)` followed by an intentional runtime error. Verified transaction rollback guarantees zero partial writes survived in PostgreSQL.
   - **Process Restart & Connection Durability:** Simulated process termination by closing the active PostgreSQL connection pool (`client.close()`). Initialized a fresh client instance and repositories in a separate process scope, reloaded identity and space state, and verified all persisted entities, memberships, and fields remained intact and durable.
+  - **Idempotency Persistence:** Verified that for the same principal and route, submitting the same idempotency key and payload hash replays the original cached response; submitting the same key with a modified payload hash returns a 409 conflict (`idempotency_conflict`). Persisted in PostgreSQL table `idempotency_keys` with primary key `(principal_id, route, key)`. Tested in `packages/db/test/postgres-concurrency.test.ts` (test 9) and `apps/api/src/dispatcher.test.ts` (Gate 6).
+  - **Atomic Intent and Audit Persistence:** Verified that intent creation and its associated audit event are executed inside a single PostgreSQL transaction (`client.transaction`). A failure during audit insertion rolls back the intent insert completely, leaving zero orphan intents or partial writes. Tested in `packages/db/test/postgres-concurrency.test.ts` (test 10) and `apps/api/src/index.ts`.
+  - **Durable Worker Jobs:** Verified that queued worker jobs survive process termination. After restart, 20 parallel workers racing to claim 3 queued jobs via PostgreSQL `FOR UPDATE SKIP LOCKED` (`claimNextWorkerJob`) resulted in exactly 3 unique claims and 17 `undefined` responses, preventing duplicate execution under race conditions. Tested in `packages/db/test/postgres-concurrency.test.ts` (test 11).
 
 ### 3. `npm run typecheck`
 - **Status:** **LOCAL_PASS** (0 errors across root, backend apps, domain packages, and Next.js web application).
@@ -145,5 +148,43 @@ Following the implementation of PostgreSQL schema enhancements (`packages/db/pos
 - **Deterministic Cryptographic Verification (Local):** **LOCAL_PASS** — Verified with RFC 7515/7519 compliant ES256 key pairs via `jose` and `@privy-io/node` verifier.
 - **Live Privy Cloud Credential Verification:** **NOT RUN** — Live JWT exchange against Privy's remote JWKS endpoint (`auth.privy.io`) is gated behind live production credentials.
 - **Live Arc Mainnet / Testnet RPC Transactions:** **NOT RUN** — Synthetic JSON-RPC mocks used locally; live chain submission gated for Plan 3.
+
+## 8. Remove Unsafe Server-Signed Consumer Execution & Enforce Intent-Bound Lifecycle (Plan 1 Task 8)
+
+**Date:** 2026-10-14  
+Following the removal of unsafe server-signed consumer execution, establishing API startup independence from `ARC_SETTLEMENT_PRIVATE_KEY`, binding transactions to approved intents, and enforcing the client-signed payment state machine (`prepared → submitted → confirming → confirmed/failed`):
+
+### 1. `npm test`
+- **Status:** **LOCAL_PASS** (**115 passing, 0 failing**, duration ~11.6s)
+- **Dedicated Unsafe Execution Test Suite (`apps/api/test/unsafe-execution.test.ts`):**
+  - **Server Startup Independence:** Verified `createApiServer()` starts cleanly and serves 200 on `/health` when `ARC_SETTLEMENT_PRIVATE_KEY` is completely unset.
+  - **Blocking Server-Key Transfers:** Verified that public/consumer requests to `POST /v1/payments/:id/execute` and `POST /v1/payments/:id/execute-async` return 403 Forbidden with `{ error: "server_signing_disallowed" }`, even when invoked by space owners.
+  - **Rejecting Legacy Unsafe Endpoints:** Verified unversioned legacy endpoints `POST /payments/:id/execute` and `POST /payments/:id/execute-async` return 403 Forbidden with `{ error: "server_signing_disallowed" }` (or 401 Unauthorized when unauthenticated), preventing bypass of wallet authorization.
+  - **Approved Intent Binding:** Verified `POST /v1/payments/prepare` and `POST /v1/payments` reject unapproved or rejected intents with 400 Bad Request (`intent_not_approved`). Preparation generates calldata with `value: "0"`, ERC20 transfer selector `0xa9059cbb`, Arc USDC contract address, and chain ID `5042`.
+  - **Cross-Tenant Isolation:** Verified Principal B cannot prepare or submit against Principal A's intents or payments (returns non-leaking 404 `intent_not_found` / `payment_not_found`).
+  - **Payment State Machine (`prepared → submitted → confirmed`):**
+    - Payment is initialized with status `"prepared"`.
+    - Client submits signed transaction via `POST /v1/payments/:id/submission`, transitioning status to `"submitted"`.
+    - Accepting submission is verified to **NOT** be proof of settlement (status remains strictly `"submitted"`, not `"confirmed"` or `"settled"`).
+    - Status transitions from `"submitted"` to `"confirmed"` via confirmation endpoint/worker (`POST /v1/payments/:id/confirm`).
+    - Attempting to submit against a payment that is already `"confirmed"` or `"settled"` is rejected with 409 Conflict (`invalid_state_transition`).
+  - **Duplicate & Conflicting Submission Prevention:**
+    - Re-submitting the exact same `txHash` for a `"submitted"` payment succeeds idempotently (200 OK).
+    - Submitting a conflicting `txHash` for an already-submitted payment returns 409 Conflict (`duplicate_submission`).
+    - Submitting an identical `txHash` for a different payment is rejected with 409 Conflict (`duplicate_submission`).
+  - **Audit Trail & Activity Feed:** Submission and confirmation emit audited events (`payment.submitted`, `payment.confirmed`) scoped to the active Space.
+
+### 2. `npm run typecheck`
+- **Status:** **LOCAL_PASS** (0 errors across root, backend apps, domain packages, and Next.js web application).
+
+### 3. `npm run build --workspace=@mcosm/web`
+- **Status:** **LOCAL_PASS** (Next.js production build succeeded; static routes `/` and `/_not-found` generated cleanly).
+
+### 4. Verification Distinctions (Deterministic Local vs. Live Services)
+- **Local Execution Security:** **LOCAL_PASS** — Direct transfers require client-side signatures; server private-key execution blocked on consumer routes; state machine transitions enforced.
+- **Local PostgreSQL 16.15 Database Persistence:** **LOCAL_PASS** — Exercised against live local PostgreSQL 16.15 validating migrations, persistence, transactions, and race condition invariants.
+- **Live Privy Cloud Credential Verification:** **NOT RUN** — RFC 7515/7519 compliant ES256 key pairs via `jose` and `@privy-io/node` verifier used locally; live JWKS endpoint gated behind production credentials.
+- **Live Arc Mainnet / Testnet RPC Transactions:** **NOT RUN** — Synthetic JSON-RPC mocks used locally; live chain submission gated for Plan 3.
+
 
 

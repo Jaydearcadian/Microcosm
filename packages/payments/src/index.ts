@@ -18,8 +18,21 @@ export type CreatePaymentInput = {
   tokenAddress?: string;
   amountDecimal?: string;
   amountBaseUnits?: string;
+  calldata?: string;
+  status?: PaymentStatus;
   txHash?: string;
 };
+
+export type PaymentStatus =
+  | "prepared"
+  | "ready_for_settlement"
+  | "pending_claim"
+  | "submitted"
+  | "confirming"
+  | "confirmed"
+  | "settled"
+  | "claimed"
+  | "failed";
 
 export type PaymentRecord = {
   id: string;
@@ -27,7 +40,7 @@ export type PaymentRecord = {
   amount: string;
   asset: string;
   recipientId: string;
-  status: "ready_for_settlement" | "pending_claim" | "settled" | "claimed" | "submitted" | "failed";
+  status: PaymentStatus;
   spaceId?: string;
   ownerUserId?: string;
   senderAddress?: string;
@@ -36,6 +49,7 @@ export type PaymentRecord = {
   tokenAddress?: string;
   amountDecimal?: string;
   amountBaseUnits?: string;
+  calldata?: string;
   txHash?: string;
   createdAt?: string;
   updatedAt?: string;
@@ -54,6 +68,13 @@ export type PersistedPaymentState = {
 export type PaymentService = {
   create: (input: CreatePaymentInput) => PaymentCreationResult;
   get: (paymentId: string) => PaymentRecord | undefined;
+  update: (paymentId: string, updates: Partial<PaymentRecord>) => PaymentRecord;
+  transitionStatus: (
+    paymentId: string,
+    expectedStatus: PaymentStatus | PaymentStatus[],
+    newStatus: PaymentStatus,
+    extra?: { txHash?: string }
+  ) => PaymentRecord;
   execute: (paymentId: string) => {
     payment: PaymentRecord;
     settlement: SettlementPlan;
@@ -115,16 +136,19 @@ export const createPaymentService = ({
       });
 
       const now = new Date().toISOString();
+      const initialStatus =
+        input.status ??
+        (settlementPlan.mode === "claimable"
+          ? "pending_claim"
+          : "ready_for_settlement");
+
       const payment: PaymentRecord = {
         id: paymentId,
         intentId: input.intentId,
         amount: input.amount,
         asset: input.asset,
         recipientId: input.recipient.id,
-        status:
-          settlementPlan.mode === "claimable"
-            ? "pending_claim"
-            : "ready_for_settlement",
+        status: initialStatus,
         spaceId: input.spaceId,
         ownerUserId: input.ownerUserId,
         senderAddress: input.senderAddress,
@@ -133,6 +157,7 @@ export const createPaymentService = ({
         tokenAddress: input.tokenAddress,
         amountDecimal: input.amountDecimal,
         amountBaseUnits: input.amountBaseUnits,
+        calldata: input.calldata,
         txHash: input.txHash,
         createdAt: now,
         updatedAt: now
@@ -161,6 +186,32 @@ export const createPaymentService = ({
     get: (paymentId) => {
       const payment = payments.find((item) => item.id === paymentId);
       return payment ? snapshot(payment) : undefined;
+    },
+    update: (paymentId, updates) => {
+      const payment = payments.find((item) => item.id === paymentId);
+      if (!payment) {
+        throw new Error(`Unknown payment: ${paymentId}`);
+      }
+      Object.assign(payment, updates, { updatedAt: new Date().toISOString() });
+      return snapshot(payment);
+    },
+    transitionStatus: (paymentId, expectedStatus, newStatus, extra = {}) => {
+      const payment = payments.find((item) => item.id === paymentId);
+      if (!payment) {
+        throw new Error(`Unknown payment: ${paymentId}`);
+      }
+      const expectedList = Array.isArray(expectedStatus) ? expectedStatus : [expectedStatus];
+      if (!expectedList.includes(payment.status)) {
+        throw new Error(
+          `Invalid state transition for payment ${paymentId}: expected ${expectedList.join(" or ")}, found ${payment.status}`
+        );
+      }
+      payment.status = newStatus;
+      if (extra.txHash) {
+        payment.txHash = extra.txHash;
+      }
+      payment.updatedAt = new Date().toISOString();
+      return snapshot(payment);
     },
     execute: (paymentId) => {
       const payment = payments.find((item) => item.id === paymentId);

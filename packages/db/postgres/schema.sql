@@ -201,6 +201,20 @@ create table if not exists notifications (
   updated_at timestamptz not null default now()
 );
 
+alter table if exists worker_jobs add column if not exists lease_owner text;
+alter table if exists worker_jobs add column if not exists leased_at timestamptz;
+
+create table if not exists idempotency_keys (
+  key text not null,
+  principal_id text not null,
+  route text not null,
+  request_hash text not null,
+  status_code int not null,
+  response_body jsonb not null,
+  created_at timestamptz not null default now(),
+  primary key (principal_id, route, key)
+);
+
 create index if not exists recipients_owner_idx on recipients(owner_type, owner_id);
 create index if not exists wallets_owner_idx on wallets(owner_type, owner_id);
 create index if not exists intents_envelope_idx on intents(envelope_id);
@@ -211,4 +225,6 @@ create index if not exists settlements_payment_idx on settlements(payment_id);
 create index if not exists ledger_entries_account_idx on ledger_entries(account_id);
 create index if not exists audit_events_object_idx on audit_events(object_type, object_id);
 create index if not exists worker_jobs_payment_idx on worker_jobs(payment_id);
+create index if not exists worker_jobs_lease_idx on worker_jobs(status, leased_at);
 create index if not exists notifications_recipient_idx on notifications(recipient);
+create index if not exists idempotency_keys_lookup_idx on idempotency_keys(principal_id, route, key);

@@ -2,7 +2,7 @@ export type ApiRuntimeConfig = {
   databaseUrl: string;
   privyAppId: string;
   privyAppSecret: string;
-  arcSettlementPrivateKey: string;
+  arcSettlementPrivateKey?: string;
   arcRpcUrl: string;
   arcContracts: {
     settlementRouter?: string;
@@ -25,10 +25,8 @@ export const getApiRuntimeConfig = (
   databaseUrl: requireEnv("DATABASE_URL", env.DATABASE_URL),
   privyAppId: requireEnv("PRIVY_APP_ID", env.PRIVY_APP_ID),
   privyAppSecret: requireEnv("PRIVY_APP_SECRET", env.PRIVY_APP_SECRET),
-  arcSettlementPrivateKey: requireEnv(
-    "ARC_SETTLEMENT_PRIVATE_KEY",
-    env.ARC_SETTLEMENT_PRIVATE_KEY ?? env.PRIVATE_KEY
-  ),
+  arcSettlementPrivateKey:
+    env.ARC_SETTLEMENT_PRIVATE_KEY ?? env.PRIVATE_KEY ?? undefined,
   arcRpcUrl:
     env.ARC_NETWORK === "mainnet"
       ? requireEnv("ARC_MAINNET_RPC_URL", env.ARC_MAINNET_RPC_URL)

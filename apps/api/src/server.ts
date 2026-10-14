@@ -22,6 +22,7 @@ export type ApiServerOptions = Parameters<typeof createApiAppAsync>[0] & {
     jwtVerificationKey?: string;
     required?: boolean;
   };
+  allowLegacyExecution?: boolean;
 };
 
 const readJson = async (request: AsyncIterable<Buffer>): Promise<unknown> => {
@@ -280,11 +281,25 @@ export const createApiServer = (
 
       if (request.method === "POST" && /^\/payments\/[^/]+\/execute$/.test(url.pathname)) {
         const paymentId = url.pathname.split("/")[2]!;
+        if (!options.allowLegacyExecution) {
+          return sendJson(response, 403, {
+            error: "server_signing_disallowed",
+            code: "server_signing_disallowed",
+            message: "Server-side transaction signing is disallowed for consumer execution. Transactions must be executed via client-signed submissions."
+          });
+        }
         return sendJson(response, 200, await app.payments.execute(paymentId));
       }
 
       if (request.method === "POST" && /^\/payments\/[^/]+\/execute-async$/.test(url.pathname)) {
         const paymentId = url.pathname.split("/")[2]!;
+        if (!options.allowLegacyExecution) {
+          return sendJson(response, 403, {
+            error: "server_signing_disallowed",
+            code: "server_signing_disallowed",
+            message: "Server-side transaction signing is disallowed for consumer execution. Transactions must be executed via client-signed submissions."
+          });
+        }
         return sendJson(response, 200, await app.payments.executeAsync(paymentId));
       }
 
