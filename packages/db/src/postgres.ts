@@ -1,7 +1,13 @@
+import { randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
+
 import type {
   IdentityRepository,
   IdentityState,
-  UserRecord
+  UserRecord,
+  ExternalIdentity,
+  IdentityResolution,
+  WalletLinkChallenge
 } from "../../identity/src/index.ts";
 import type { ResolvedRecipient } from "../../recipient-resolution/src/index.ts";
 import type { Envelope } from "../../policy-engine/src/index.ts";
@@ -12,6 +18,11 @@ import type { SettlementRecord } from "../../settlement/src/index.ts";
 import type { LedgerEntry } from "../../ledger/src/index.ts";
 import type { AuditEvent } from "../../audit/src/index.ts";
 import type { WorkerJob } from "../../../apps/worker/src/index.ts";
+import type {
+  Space,
+  SpaceMembership,
+  SpaceService
+} from "../../spaces/src/index.ts";
 
 export type SqlQueryResult = {
   rows: Array<Record<string, unknown>>;
@@ -19,6 +30,8 @@ export type SqlQueryResult = {
 
 export type SqlClient = {
   query: (sql: string, params?: unknown[]) => Promise<SqlQueryResult>;
+  transaction?: <T>(fn: (tx: SqlClient) => Promise<T>) => Promise<T>;
+  close?: () => Promise<void>;
 };
 
 export type AppState = {
@@ -37,6 +50,12 @@ export type AppStateRepository = {
   upsertEnvelope: (envelope: Envelope) => Promise<void>;
   upsertIntent: (intent: PaymentIntentRecord) => Promise<void>;
   upsertPaymentState: (entry: PersistedPaymentState) => Promise<void>;
+  updatePaymentTransition?: (
+    paymentId: string,
+    expectedStatus: string,
+    newStatus: string,
+    txHash?: string
+  ) => Promise<boolean>;
   upsertNotification: (event: NotificationEvent) => Promise<void>;
   upsertSettlement: (record: SettlementRecord) => Promise<void>;
   upsertLedgerEntry: (entry: LedgerEntry) => Promise<void>;
@@ -45,10 +64,11 @@ export type AppStateRepository = {
 };
 
 export type PostgresAppRepository = IdentityRepository & AppStateRepository;
+export type PostgresSpaceService = SpaceService;
 
 const mapUserRow = (row: Record<string, unknown>): UserRecord => ({
   id: String(row.id),
-  email: String(row.email),
+  email: row.email ? String(row.email) : "",
   privyUserId: String(row.privy_user_id),
   walletAddress:
     typeof row.wallet_address === "string" ? row.wallet_address : undefined
@@ -61,7 +81,8 @@ const mapRecipientRow = (row: Record<string, unknown>): ResolvedRecipient => ({
   ownerId: typeof row.owner_id === "string" ? row.owner_id : undefined,
   walletAddress:
     typeof row.wallet_address === "string" ? row.wallet_address : undefined,
-  claimStatus: row.claim_status as ResolvedRecipient["claimStatus"]
+  claimStatus: row.claim_status as ResolvedRecipient["claimStatus"],
+  spaceId: typeof row.space_id === "string" ? row.space_id : undefined
 });
 
 const parseJsonColumn = <T>(value: unknown): T => {
@@ -70,6 +91,14 @@ const parseJsonColumn = <T>(value: unknown): T => {
   }
 
   return value as T;
+};
+
+export const applyPostgresSchema = async (client: SqlClient): Promise<void> => {
+  const schemaSql = readFileSync(
+    new URL("../postgres/schema.sql", import.meta.url),
+    "utf8"
+  );
+  await client.query(schemaSql);
 };
 
 export const createPostgresIdentityRepository = ({
@@ -83,7 +112,7 @@ export const createPostgresIdentityRepository = ({
         "select id, email, privy_user_id, wallet_address from users order by created_at asc"
       ),
       client.query(
-        "select id, lookup_key, owner_type, owner_id, wallet_address, claim_status from recipients order by created_at asc"
+        "select id, lookup_key, owner_type, owner_id, wallet_address, claim_status, space_id from recipients order by created_at asc"
       )
     ]);
 
@@ -101,19 +130,20 @@ export const createPostgresIdentityRepository = ({
            privy_user_id = excluded.privy_user_id,
            wallet_address = excluded.wallet_address,
            updated_at = now()`,
-      [user.id, user.email, user.privyUserId, user.walletAddress ?? null]
+      [user.id, user.email || null, user.privyUserId, user.walletAddress ?? null]
     );
   },
   async upsertRecipient(recipient) {
     await client.query(
-      `insert into recipients (id, lookup_key, owner_type, owner_id, wallet_address, claim_status)
-       values ($1, $2, $3, $4, $5, $6)
+      `insert into recipients (id, lookup_key, owner_type, owner_id, wallet_address, claim_status, space_id)
+       values ($1, $2, $3, $4, $5, $6, $7)
        on conflict (id) do update
        set lookup_key = excluded.lookup_key,
            owner_type = excluded.owner_type,
            owner_id = excluded.owner_id,
            wallet_address = excluded.wallet_address,
            claim_status = excluded.claim_status,
+           space_id = coalesce(excluded.space_id, recipients.space_id),
            updated_at = now()`,
       [
         recipient.id,
@@ -121,9 +151,260 @@ export const createPostgresIdentityRepository = ({
         recipient.ownerType,
         recipient.ownerId ?? null,
         recipient.walletAddress ?? null,
-        recipient.claimStatus
+        recipient.claimStatus,
+        recipient.spaceId ?? null
       ]
     );
+  },
+  async resolveOrCreatePrincipal(input: {
+    externalIdentity: ExternalIdentity;
+    email?: string;
+  }): Promise<IdentityResolution> {
+    const normEmail = input.email ? input.email.trim().toLowerCase() : null;
+    const newUserId = `usr_${randomBytes(8).toString("hex")}`;
+    const now = new Date().toISOString();
+
+    const res = await client.query(
+      `insert into users (id, email, privy_user_id, created_at, updated_at)
+       values ($1, $2, $3, $4, $4)
+       on conflict (privy_user_id) do update
+       set email = coalesce(nullif($2, ''), users.email),
+           updated_at = now()
+       returning id, email, privy_user_id, wallet_address, (xmax = 0) as inserted`,
+      [newUserId, normEmail, input.externalIdentity.subject, now]
+    );
+
+    const row = res.rows[0]!;
+    const user: UserRecord = {
+      id: String(row.id),
+      email: row.email ? String(row.email) : "",
+      privyUserId: String(row.privy_user_id),
+      walletAddress:
+        typeof row.wallet_address === "string" ? row.wallet_address : undefined
+    };
+
+    return {
+      user,
+      created: Boolean(row.inserted)
+    };
+  },
+  async saveWalletLinkChallenge(challenge: WalletLinkChallenge): Promise<void> {
+    await client.query(
+      `insert into wallet_link_challenges (id, user_id, space_id, address, nonce, message, expires_at)
+       values ($1, $2, $3, $4, $5, $6, $7)`,
+      [
+        challenge.id,
+        challenge.userId,
+        challenge.spaceId,
+        challenge.address,
+        challenge.nonce,
+        challenge.message,
+        challenge.expiresAt
+      ]
+    );
+  },
+  async consumeWalletLinkChallenge(challengeId: string): Promise<boolean> {
+    const res = await client.query(
+      `update wallet_link_challenges
+       set consumed_at = now()
+       where id = $1 and consumed_at is null and expires_at > now()
+       returning id`,
+      [challengeId]
+    );
+    return res.rows.length === 1;
+  }
+});
+
+export const createPostgresSpaceService = ({
+  client
+}: {
+  client: SqlClient;
+}): PostgresSpaceService => ({
+  async ensurePersonalSpace(userId: string): Promise<Space> {
+    const now = new Date().toISOString();
+    const spaceId = `spc_${randomBytes(8).toString("hex")}`;
+
+    const res = await client.query(
+      `insert into spaces (id, type, name, owner_user_id, status, created_at, updated_at)
+       values ($1, 'personal', 'Personal Space', $2, 'active', $3, $3)
+       on conflict (owner_user_id) where type = 'personal'
+       do update set updated_at = now()
+       returning id, type, name, owner_user_id, status, created_at, updated_at`,
+      [spaceId, userId, now]
+    );
+
+    const row = res.rows[0]!;
+    const space: Space = {
+      id: String(row.id),
+      type: row.type as "personal",
+      name: String(row.name),
+      ownerUserId: String(row.owner_user_id),
+      status: row.status as "active",
+      createdAt: new Date(row.created_at as string).toISOString(),
+      updatedAt: new Date(row.updated_at as string).toISOString()
+    };
+
+    await client.query(
+      `insert into space_memberships (space_id, user_id, role, status, created_at)
+       values ($1, $2, 'owner', 'active', $3)
+       on conflict (space_id, user_id) do nothing`,
+      [space.id, userId, now]
+    );
+
+    return space;
+  },
+
+  async getSpace(spaceId: string): Promise<Space | undefined> {
+    const res = await client.query(
+      `select id, type, name, owner_user_id, status, created_at, updated_at
+       from spaces where id = $1`,
+      [spaceId]
+    );
+    if (res.rows.length === 0) return undefined;
+    const row = res.rows[0]!;
+    return {
+      id: String(row.id),
+      type: row.type as "personal" | "shared",
+      name: String(row.name),
+      ownerUserId: String(row.owner_user_id),
+      status: row.status as "active" | "suspended" | "archived",
+      createdAt: new Date(row.created_at as string).toISOString(),
+      updatedAt: new Date(row.updated_at as string).toISOString()
+    };
+  },
+
+  async listSpacesForUser(userId: string): Promise<Space[]> {
+    const res = await client.query(
+      `select s.id, s.type, s.name, s.owner_user_id, s.status, s.created_at, s.updated_at
+       from spaces s
+       join space_memberships m on m.space_id = s.id
+       where m.user_id = $1 and m.status = 'active'`,
+      [userId]
+    );
+    return res.rows.map((row) => ({
+      id: String(row.id),
+      type: row.type as "personal" | "shared",
+      name: String(row.name),
+      ownerUserId: String(row.owner_user_id),
+      status: row.status as "active" | "suspended" | "archived",
+      createdAt: new Date(row.created_at as string).toISOString(),
+      updatedAt: new Date(row.updated_at as string).toISOString()
+    }));
+  },
+
+  async requireActiveMembership(
+    userId: string,
+    spaceId: string
+  ): Promise<SpaceMembership> {
+    const res = await client.query(
+      `select space_id, user_id, role, status, created_at
+       from space_memberships
+       where space_id = $1 and user_id = $2`,
+      [spaceId, userId]
+    );
+    if (res.rows.length === 0 || res.rows[0]!.status !== "active") {
+      throw new Error(
+        `Active membership in space ${spaceId} required for user ${userId}`
+      );
+    }
+    const row = res.rows[0]!;
+    return {
+      spaceId: String(row.space_id),
+      userId: String(row.user_id),
+      role: row.role as SpaceMembership["role"],
+      status: row.status as SpaceMembership["status"],
+      createdAt: new Date(row.created_at as string).toISOString()
+    };
+  },
+
+  async assertSpaceOwnership(userId: string, spaceId: string): Promise<void> {
+    const res = await client.query(
+      `select owner_user_id from spaces where id = $1`,
+      [spaceId]
+    );
+    if (res.rows.length === 0 || res.rows[0]!.owner_user_id !== userId) {
+      throw new Error(`Ownership of space ${spaceId} required for user ${userId}`);
+    }
+  },
+
+  async revokeMembership(userId: string, spaceId: string): Promise<void> {
+    await client.query(
+      `update space_memberships set status = 'revoked'
+       where space_id = $1 and user_id = $2`,
+      [spaceId, userId]
+    );
+  },
+
+  async createSpace(
+    userId: string,
+    input: { name: string; type?: "personal" | "shared" }
+  ): Promise<Space> {
+    const now = new Date().toISOString();
+    const spaceId = `spc_${randomBytes(8).toString("hex")}`;
+    const type = input.type ?? "shared";
+    await client.query(
+      `insert into spaces (id, type, name, owner_user_id, status, created_at, updated_at)
+       values ($1, $2, $3, $4, 'active', $5, $5)`,
+      [spaceId, type, input.name, userId, now]
+    );
+    await client.query(
+      `insert into space_memberships (space_id, user_id, role, status, created_at)
+       values ($1, $2, 'owner', 'active', $3)`,
+      [spaceId, userId, now]
+    );
+    return {
+      id: spaceId,
+      type,
+      name: input.name,
+      ownerUserId: userId,
+      status: "active",
+      createdAt: now,
+      updatedAt: now
+    };
+  },
+
+  async addMember(input: {
+    spaceId: string;
+    userId: string;
+    role: SpaceMembership["role"];
+  }): Promise<SpaceMembership> {
+    const now = new Date().toISOString();
+    await client.query(
+      `insert into space_memberships (space_id, user_id, role, status, created_at)
+       values ($1, $2, $3, 'active', $4)
+       on conflict (space_id, user_id) do update
+       set role = excluded.role,
+           status = 'active'`,
+      [input.spaceId, input.userId, input.role, now]
+    );
+    return {
+      spaceId: input.spaceId,
+      userId: input.userId,
+      role: input.role,
+      status: "active",
+      createdAt: now
+    };
+  },
+
+  async getMembership(
+    userId: string,
+    spaceId: string
+  ): Promise<SpaceMembership | undefined> {
+    const res = await client.query(
+      `select space_id, user_id, role, status, created_at
+       from space_memberships
+       where space_id = $1 and user_id = $2`,
+      [spaceId, userId]
+    );
+    if (res.rows.length === 0) return undefined;
+    const row = res.rows[0]!;
+    return {
+      spaceId: String(row.space_id),
+      userId: String(row.user_id),
+      role: row.role as SpaceMembership["role"],
+      status: row.status as SpaceMembership["status"],
+      createdAt: new Date(row.created_at as string).toISOString()
+    };
   }
 });
 
@@ -134,7 +415,16 @@ export const createPostgresAppRepository = ({
 }): PostgresAppRepository => ({
   ...createPostgresIdentityRepository({ client }),
   async loadAppState(): Promise<AppState> {
-    const [envelopes, intents, payments, notifications, settlements, ledgerEntries, auditEvents, workerJobs] = await Promise.all([
+    const [
+      envelopes,
+      intents,
+      payments,
+      notifications,
+      settlements,
+      ledgerEntries,
+      auditEvents,
+      workerJobs
+    ] = await Promise.all([
       client.query("select data from envelopes order by created_at asc"),
       client.query("select data from intents order by created_at asc"),
       client.query(
@@ -153,7 +443,9 @@ export const createPostgresAppRepository = ({
         parseJsonColumn<PaymentIntentRecord>(row.data)
       ),
       payments: payments.rows.map((row) => ({
-        payment: parseJsonColumn<PersistedPaymentState["payment"]>(row.payment_data),
+        payment: parseJsonColumn<PersistedPaymentState["payment"]>(
+          row.payment_data
+        ),
         settlement: parseJsonColumn<PersistedPaymentState["settlement"]>(
           row.settlement_data
         )
@@ -177,22 +469,24 @@ export const createPostgresAppRepository = ({
   },
   async upsertEnvelope(envelope) {
     await client.query(
-      `insert into envelopes (id, data)
-       values ($1, $2::jsonb)
+      `insert into envelopes (id, space_id, data)
+       values ($1, $2, $3::jsonb)
        on conflict (id) do update
-       set data = excluded.data,
+       set space_id = excluded.space_id,
+           data = excluded.data,
            updated_at = now()`,
-      [envelope.id, JSON.stringify(envelope)]
+      [envelope.id, envelope.spaceId ?? null, JSON.stringify(envelope)]
     );
   },
   async upsertIntent(intent) {
     await client.query(
-      `insert into intents (id, envelope_id, recipient_id, status, data)
-       values ($1, $2, $3, $4, $5::jsonb)
+      `insert into intents (id, envelope_id, recipient_id, status, space_id, data)
+       values ($1, $2, $3, $4, $5, $6::jsonb)
        on conflict (id) do update
        set envelope_id = excluded.envelope_id,
            recipient_id = excluded.recipient_id,
            status = excluded.status,
+           space_id = excluded.space_id,
            data = excluded.data,
            updated_at = now()`,
       [
@@ -200,18 +494,21 @@ export const createPostgresAppRepository = ({
         intent.envelopeId,
         intent.recipientId,
         intent.status,
+        intent.spaceId ?? null,
         JSON.stringify(intent)
       ]
     );
   },
   async upsertPaymentState(entry) {
     await client.query(
-      `insert into payments (id, intent_id, recipient_id, status, payment_data, settlement_data)
-       values ($1, $2, $3, $4, $5::jsonb, $6::jsonb)
+      `insert into payments (id, intent_id, recipient_id, status, space_id, tx_hash, payment_data, settlement_data)
+       values ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb)
        on conflict (id) do update
        set intent_id = excluded.intent_id,
            recipient_id = excluded.recipient_id,
            status = excluded.status,
+           space_id = excluded.space_id,
+           tx_hash = coalesce(excluded.tx_hash, payments.tx_hash),
            payment_data = excluded.payment_data,
            settlement_data = excluded.settlement_data,
            updated_at = now()`,
@@ -220,10 +517,29 @@ export const createPostgresAppRepository = ({
         entry.payment.intentId,
         entry.payment.recipientId,
         entry.payment.status,
+        entry.payment.spaceId ?? null,
+        entry.payment.txHash ?? null,
         JSON.stringify(entry.payment),
         JSON.stringify(entry.settlement)
       ]
     );
+  },
+  async updatePaymentTransition(
+    paymentId: string,
+    expectedStatus: string,
+    newStatus: string,
+    txHash?: string
+  ): Promise<boolean> {
+    const res = await client.query(
+      `update payments
+       set status = $1,
+           tx_hash = coalesce($2, tx_hash),
+           updated_at = now()
+       where id = $3 and status = $4
+       returning id`,
+      [newStatus, txHash ?? null, paymentId, expectedStatus]
+    );
+    return res.rows.length === 1;
   },
   async upsertNotification(event) {
     const id = event.id ?? `ntf_${Date.now()}`;
@@ -236,7 +552,13 @@ export const createPostgresAppRepository = ({
            recipient = excluded.recipient,
            data = excluded.data,
            updated_at = now()`,
-      [id, event.type, event.channel, event.recipient, JSON.stringify({ ...event, id })]
+      [
+        id,
+        event.type,
+        event.channel,
+        event.recipient,
+        JSON.stringify({ ...event, id })
+      ]
     );
   },
   async upsertSettlement(record) {
@@ -283,14 +605,15 @@ export const createPostgresAppRepository = ({
   },
   async upsertAuditEvent(event) {
     await client.query(
-      `insert into audit_events (id, actor_type, actor_id, event_type, object_type, object_id, data)
-       values ($1, $2, $3, $4, $5, $6, $7::jsonb)
+      `insert into audit_events (id, actor_type, actor_id, event_type, object_type, object_id, space_id, data)
+       values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
        on conflict (id) do update
        set actor_type = excluded.actor_type,
            actor_id = excluded.actor_id,
            event_type = excluded.event_type,
            object_type = excluded.object_type,
            object_id = excluded.object_id,
+           space_id = excluded.space_id,
            data = excluded.data,
            updated_at = now()`,
       [
@@ -300,6 +623,7 @@ export const createPostgresAppRepository = ({
         event.eventType,
         event.objectType,
         event.objectId,
+        event.spaceId ?? null,
         JSON.stringify(event)
       ]
     );
@@ -331,22 +655,45 @@ export const createNodePostgresClient = async ({
   connectionString
 }: {
   connectionString: string;
-}): Promise<SqlClient> => {
+}): Promise<SqlClient & { close: () => Promise<void> }> => {
   const dynamicImport = new Function(
     "specifier",
     "return import(specifier)"
   ) as (specifier: string) => Promise<unknown>;
   const pg = (await dynamicImport("pg")) as {
-    Client: new (options: { connectionString: string }) => {
-      connect: () => Promise<void>;
-      query: SqlClient["query"];
+    Pool: new (options: { connectionString: string }) => {
+      connect: () => Promise<{
+        query: (sql: string, params?: unknown[]) => Promise<SqlQueryResult>;
+        release: () => void;
+      }>;
+      query: (sql: string, params?: unknown[]) => Promise<SqlQueryResult>;
+      end: () => Promise<void>;
     };
   };
 
-  const client = new pg.Client({ connectionString });
-  await client.connect();
+  const pool = new pg.Pool({ connectionString });
 
   return {
-    query: client.query.bind(client)
+    query: (sql: string, params?: unknown[]) => pool.query(sql, params),
+    async transaction<T>(fn: (tx: SqlClient) => Promise<T>): Promise<T> {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        const txClient: SqlClient = {
+          query: (sql, params) => client.query(sql, params)
+        };
+        const result = await fn(txClient);
+        await client.query("COMMIT");
+        return result;
+      } catch (err) {
+        await client.query("ROLLBACK");
+        throw err;
+      } finally {
+        client.release();
+      }
+    },
+    async close() {
+      await pool.end();
+    }
   };
 };

@@ -117,6 +117,12 @@ export type IdentityRepository = {
   load: () => Promise<IdentityState>;
   upsertUser: (user: UserRecord) => Promise<void>;
   upsertRecipient: (recipient: ResolvedRecipient) => Promise<void>;
+  resolveOrCreatePrincipal?: (input: {
+    externalIdentity: ExternalIdentity;
+    email?: string;
+  }) => Promise<IdentityResolution>;
+  saveWalletLinkChallenge?: (challenge: WalletLinkChallenge) => Promise<void>;
+  consumeWalletLinkChallenge?: (challengeId: string) => Promise<boolean>;
 };
 
 export type IdentityService = {
@@ -151,10 +157,12 @@ const normalizeWallet = (walletAddress: string) => walletAddress.toLowerCase();
 
 export const createIdentityService = ({
   directory = {},
-  provisioner
+  provisioner,
+  repository
 }: {
   directory?: RecipientDirectory;
   provisioner?: IdentityProvisioner;
+  repository?: IdentityRepository;
 } = {}): IdentityService => {
   const users = new Map<string, UserRecord>();
   const recipients = new Map<string, ResolvedRecipient>();
@@ -259,6 +267,12 @@ export const createIdentityService = ({
       return user ? structuredClone(user) : undefined;
     },
     async resolveOrCreatePrincipal(input) {
+      if (repository?.resolveOrCreatePrincipal) {
+        const resolution = await repository.resolveOrCreatePrincipal(input);
+        users.set(resolution.user.id, structuredClone(resolution.user));
+        return resolution;
+      }
+
       const normEmail = input.email ? normalizeEmail(input.email) : undefined;
       const existingBySubject = [...users.values()].find(
         (u) => u.privyUserId === input.externalIdentity.subject

@@ -34,6 +34,7 @@ import type { ResolvedRecipient } from "../../../packages/recipient-resolution/s
 import {
   createNodePostgresClient,
   createPostgresAppRepository,
+  createPostgresSpaceService,
   type AppStateRepository
 } from "../../../packages/db/src/index.ts";
 import {
@@ -121,7 +122,8 @@ export const createApiApp = (
   });
   const identity = createIdentityService({
     directory: options.directory,
-    provisioner: options.identity?.provisioner
+    provisioner: options.identity?.provisioner,
+    repository: options.identity?.repository
   });
   const spaces = options.spaces ?? createSpaceService();
   const notifications = createNotificationService(notificationOptions);
@@ -471,12 +473,16 @@ export const createApiAppAsync = async (
   } = {}
 ) => {
   let repository = options.identity?.repository;
+  let spaces = options.spaces;
 
   if (!repository) {
     const connectionString = options.databaseUrl ?? process.env.DATABASE_URL;
     if (connectionString) {
       const client = await createNodePostgresClient({ connectionString });
       repository = createPostgresAppRepository({ client });
+      if (!spaces) {
+        spaces = createPostgresSpaceService({ client });
+      }
     }
   }
 
@@ -495,10 +501,12 @@ export const createApiAppAsync = async (
   const appState = repository?.loadAppState ? await repository.loadAppState() : options.state;
   const app = createApiApp({
     ...options,
+    spaces,
     identity: {
       ...options.identity,
       initialState,
-      provisioner
+      provisioner,
+      repository
     },
     state: appState
   });

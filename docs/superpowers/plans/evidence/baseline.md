@@ -112,9 +112,38 @@ Following the implementation of the centralized `/v1` route dispatcher and princ
 - **Status:** **LOCAL_PASS** (Next.js production build succeeded with Turbopack/Webpack; static routes `/` and `/_not-found` generated cleanly).
 
 ### 4. Verification Distinctions (Deterministic Local Mocks vs. Live Services)
+## 7. PostgreSQL Persistence & Concurrency Validation (Plan 1 Task 7)
+
+**Date:** 2026-10-14  
+Following the implementation of PostgreSQL schema enhancements (`packages/db/postgres/schema.sql`), connection pool & transaction management (`packages/db/src/postgres.ts`), PostgreSQL-backed space service and atomic upsert operations, and comprehensive concurrency validation against a real local PostgreSQL 16 instance (`packages/db/test/postgres-concurrency.test.ts`):
+
+### 1. `npm ci`
+- **Status:** **PASS**
+- **Evidence:** Added 1959 packages, audited 1989 packages in 2m. Monorepo workspaces (`@mcosm/web`, `@mcosm/api-contracts`, `@mcosm/identity`, `@mcosm/spaces`, `@mcosm/db`, etc.) linked cleanly.
+
+### 2. `npm test`
+- **Status:** **LOCAL_PASS** (**111 passing, 0 failing**, duration ~7.2s)
+- **Evidence:** Complete test suite runs via `node --experimental-strip-types --test apps/**/*.test.ts packages/*/test/**/*.test.ts packages/adapters/*/test/**/*.test.ts`.
+- **PostgreSQL 16 Test Suite Coverage Highlights (`packages/db/test/postgres-concurrency.test.ts`):**
+  - **Schema Migrations & Idempotency:** Executed `applyPostgresSchema` repeatedly against real PostgreSQL 16.15; verified idempotent table creation across all 13 core tables (`users`, `recipients`, `spaces`, `space_memberships`, `wallet_link_challenges`, `envelopes`, `intents`, `payments`, `notifications`, `settlements`, `ledger_entries`, `audit_events`, `worker_jobs`) and validated critical unique indexes (`spaces_personal_owner_idx`, `payments_tx_hash_idx`, `users_privy_user_id_key`).
+  - **Full Entity Lifecycle & State Hydration:** Created and verified end-to-end persistence for canonical users, personal spaces, shared spaces, space memberships, recipients (with `space_id`), envelopes (with `space_id`), payment intents (with `space_id`), payments (with `space_id` and `tx_hash`), and audit events (with `space_id`). Verified that `identityRepo.load()` and `appRepo.loadAppState()` rehydrate complete relational state accurately.
+  - **Concurrent Principal Creation:** Dispatched 25 concurrent `resolveOrCreatePrincipal` calls for the same Privy external identity (`did:privy:...`). Verified that exactly 1 call resulted in `created: true` and 24 resulted in `created: false`, every call resolved to the exact same canonical `userId`, and PostgreSQL contained exactly 1 row in `users`.
+  - **Concurrent Personal Space Creation:** Dispatched 25 concurrent `ensurePersonalSpace` calls for the same user. Verified that every concurrent racer received the identical `spaceId`, active owner membership was verified, and PostgreSQL contained exactly 1 personal space for the user enforced by `spaces_personal_owner_idx`.
+  - **Atomic Single-Use Wallet-Link Challenge Consumption:** Dispatched 25 concurrent `consumeWalletLinkChallenge` calls against an active challenge. Verified that exactly 1 call succeeded (`true`), 24 calls were atomically rejected (`false`), a subsequent replay attempt returned `false`, and `consumed_at` was recorded.
+  - **Atomic Payment State Machine & tx_hash Uniqueness Under Concurrency:** Two competing workers concurrently attempted status transition from `ready_for_settlement` to `submitted` with competing transaction hashes. Verified that exactly 1 worker succeeded, subsequent transitions from the obsolete state were rejected, and attempts to insert duplicate non-null `tx_hash` values triggered PostgreSQL unique constraint violation `23505`.
+  - **Transaction Rollback & Atomicity:** Executed multi-statement user and space creation within `client.transaction(...)` followed by an intentional runtime error. Verified transaction rollback guarantees zero partial writes survived in PostgreSQL.
+  - **Process Restart & Connection Durability:** Simulated process termination by closing the active PostgreSQL connection pool (`client.close()`). Initialized a fresh client instance and repositories in a separate process scope, reloaded identity and space state, and verified all persisted entities, memberships, and fields remained intact and durable.
+
+### 3. `npm run typecheck`
+- **Status:** **LOCAL_PASS** (0 errors across root, backend apps, domain packages, and Next.js web application).
+
+### 4. `npm run build --workspace=@mcosm/web`
+- **Status:** **LOCAL_PASS** (Next.js production build succeeded; static routes `/` and `/_not-found` generated cleanly).
+
+### 5. Verification Distinctions (Deterministic Local vs. Live Services)
+- **Local PostgreSQL 16.15 Database Persistence:** **LOCAL_PASS** — Exercised against live local PostgreSQL 16.15 (`microcosm_test` on `localhost:5432`) validating migrations, persistence, transactions, and race condition invariants.
 - **Deterministic Cryptographic Verification (Local):** **LOCAL_PASS** — Verified with RFC 7515/7519 compliant ES256 key pairs via `jose` and `@privy-io/node` verifier.
 - **Live Privy Cloud Credential Verification:** **NOT RUN** — Live JWT exchange against Privy's remote JWKS endpoint (`auth.privy.io`) is gated behind live production credentials.
-- **Live PostgreSQL Database Connection:** **NOT RUN** — In-memory identity, spaces, and application state services utilized for API unit tests; live PostgreSQL persistence will be verified under Plan 1 Task 7.
 - **Live Arc Mainnet / Testnet RPC Transactions:** **NOT RUN** — Synthetic JSON-RPC mocks used locally; live chain submission gated for Plan 3.
 
 
