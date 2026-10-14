@@ -7,9 +7,9 @@ import { MicrocosmSessionProvider } from "../features/identity/IdentityProvider.
 export function Providers({ children }: { children: React.ReactNode }) {
   const envAppId = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
   const appId =
-    typeof envAppId === "string" && envAppId.length === 25
-      ? envAppId
-      : "clmockprivyapp00000000000";
+    typeof envAppId === "string" && envAppId.trim().length > 0
+      ? envAppId.trim()
+      : "cmtscqnyu03nf0cl3ihq7fp96";
 
   return (
     <PrivyProvider

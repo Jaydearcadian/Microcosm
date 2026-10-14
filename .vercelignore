@@ -1,0 +1,14 @@
+# Vercel Ignore - strictly exclude all environment files and secrets from deployments
+.env
+.env.*
+!.env.example
+*.env
+.git
+.github
+node_modules
+checkpoints
+output
+evidence
+docs
+scripts
+dist

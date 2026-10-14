@@ -71,3 +71,4 @@ checkpoints/
 output/
 .vercel
 .env*
+*.tsbuildinfo
