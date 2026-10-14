@@ -41,6 +41,7 @@ import {
   createPrivyProvisioner
 } from "../../../packages/adapters/privy/src/index.ts";
 import { createArcContractClient } from "../../../packages/adapters/arc/src/index.ts";
+import { createSpaceService, type SpaceService } from "../../../packages/spaces/src/index.ts";
 
 export const apiAppName = "microcosm-api";
 
@@ -73,6 +74,7 @@ type CreateApiAppOptions = {
     repository?: IdentityRepository & Partial<AppStateRepository>;
     provisioner?: IdentityProvisioner;
   };
+  spaces?: SpaceService;
   state?: {
     envelopes?: Envelope[];
     intents?: PaymentIntentRecord[];
@@ -121,6 +123,7 @@ export const createApiApp = (
     directory: options.directory,
     provisioner: options.identity?.provisioner
   });
+  const spaces = options.spaces ?? createSpaceService();
   const notifications = createNotificationService(notificationOptions);
   const arcClient =
     settlementOptions.privateKey &&
@@ -205,9 +208,10 @@ export const createApiApp = (
       list: identity.listRecipients
     },
     users: {
-      getByPrivyUserId: identity.getUserByPrivyUserId,
-      list: identity.listUsers
+      ...identity,
+      getByPrivyUserId: identity.getUserByPrivyUserId
     },
+    identity,
     envelopes: {
       create(input: Parameters<typeof envelopes.create>[0]) {
         const envelope = envelopes.create(input);
@@ -448,6 +452,7 @@ export const createApiApp = (
         return processed;
       }
     },
+    spaces,
     notifications
   };
 };

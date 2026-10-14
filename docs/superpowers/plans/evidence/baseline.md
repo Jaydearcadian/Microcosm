@@ -72,3 +72,27 @@ Following the implementation of versioned API contracts (`packages/api-contracts
 - **Live Arc mainnet / testnet JSON-RPC transactions (`checkArcRpc`):** **NOT RUN** (RPC calls and transaction receipts tested via mock fetch and synthetic JSON-RPC responses; live chain submission gated for Plan 3).
 - **Live Privy authentication tokens:** **NOT RUN** (Privy auth provider uses valid 25-char dev placeholder `clmockprivyapp00000000000` to allow static prerendering; live Privy token validation requires live credentials).
 
+## 5. Server-Side Session Verification & Space Authorization (Plan 1 Task 5)
+
+**Date:** 2026-10-14  
+Following the implementation of server-side Privy session verification, canonical principal resolution, and Space authorization middleware (`apps/api/src/auth.ts`, `apps/api/src/server.ts`, `packages/adapters/privy/src/index.ts`):
+
+### 1. `npm test`
+- **Status:** **PASS** (**102 passing, 0 failing**, duration ~6.8s)
+- **Coverage Highlights:**
+  - `packages/adapters/privy`: Added 3 tests validating `createPrivyTokenVerifier` against ES256 SPKI keys, rejecting expired tokens, and rejecting mismatched audience or invalid signatures.
+  - `apps/api/src/auth.ts`: Added 8 tests in `auth.test.ts` verifying `extractBearerToken`, case-insensitive `getHeader`, `verifyRequestPrincipal`, `authenticateAndAuthorize` (full session + canonical principal resolution + personal space), rejection of expired tokens (`token_expired`), rejection of client-supplied spoofed principal IDs (`identity_mismatch`), non-leaking 404 on cross-space access attempts, and space owner role enforcement.
+  - `apps/api/src/server.ts`: Added HTTP integration tests in `server.test.ts` testing public health endpoints, 401 on missing/malformed/expired/invalid Authorization headers, 200 on `/v1/me` with stable principal and personal space, idempotency on repeated calls, 403 on client-supplied identity spoofing in headers or mutation bodies, and non-leaking 404 on unauthorized cross-space requests.
+
+### 2. `npm run typecheck`
+- **Status:** **PASS** (0 errors across root, backend apps, domain packages, and Next.js web application).
+
+### 3. `npm run build --workspace=@mcosm/web`
+- **Status:** **PASS** (Next.js production build succeeded; static routes `/` and `/_not-found` generated cleanly).
+
+### 4. Verification Distinctions (Deterministic Local Mocks vs. Live Services)
+- **Deterministic Cryptographic Verification (Local):** **PASS** — Verified with RFC 7515/7519 compliant ES256 key pairs via `jose` and `@privy-io/node`'s `client.utils().auth().verifyAccessToken` and `verifyAccessToken`.
+- **Live Privy Cloud Credential Verification:** **NOT RUN** — Live JWT exchange against Privy's remote JWKS endpoint (`auth.privy.io`) is gated behind live credentials.
+- **Live PostgreSQL Database Connection:** **NOT RUN** — In-memory identity and space services utilized for API unit tests; live PostgreSQL persistence will be verified under Plan 1 Task 7.
+
+
