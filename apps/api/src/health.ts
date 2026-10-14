@@ -30,7 +30,10 @@ export const checkPostgres = async (databaseUrl: string): Promise<ServiceCheck> 
   }
 };
 
-export const checkArcRpc = async (rpcUrl: string): Promise<ServiceCheck> => {
+export const checkArcRpc = async (
+  rpcUrl: string,
+  expectedChainId?: number
+): Promise<ServiceCheck> => {
   try {
     const response = await fetch(rpcUrl, {
       method: "POST",
@@ -58,6 +61,15 @@ export const checkArcRpc = async (rpcUrl: string): Promise<ServiceCheck> => {
         name: "arc_rpc",
         status: "error",
         detail: "missing_chain_id"
+      };
+    }
+
+    const numericChainId = parseInt(payload.result, 16);
+    if (expectedChainId !== undefined && numericChainId !== expectedChainId) {
+      return {
+        name: "arc_rpc",
+        status: "error",
+        detail: `chain_id_mismatch: remote=${numericChainId}, expected=${expectedChainId}`
       };
     }
 
@@ -89,15 +101,17 @@ export const checkPrivyConfig = (
 export const getRuntimeHealth = async ({
   databaseUrl,
   arcRpcUrl,
+  expectedChainId,
   env = process.env
 }: {
   databaseUrl: string;
   arcRpcUrl: string;
+  expectedChainId?: number;
   env?: NodeJS.ProcessEnv | Record<string, string | undefined>;
 }): Promise<RuntimeHealthReport> => {
   const checks = await Promise.all([
     checkPostgres(databaseUrl),
-    checkArcRpc(arcRpcUrl),
+    checkArcRpc(arcRpcUrl, expectedChainId),
     Promise.resolve(checkPrivyConfig(env))
   ]);
 

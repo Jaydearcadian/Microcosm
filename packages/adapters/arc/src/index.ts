@@ -274,3 +274,137 @@ export const createArcContractClient = ({
     }
   };
 };
+
+export const ERC20_TRANSFER_EVENT_TOPIC =
+  "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+
+export type VerifyUsdcTransferInput = {
+  txHash: string;
+  expectedChainId?: number;
+  tokenAddress?: string;
+  from?: string;
+  to: string;
+  amountBaseUnits: bigint;
+};
+
+export type VerifyUsdcTransferResult = {
+  status: "pending" | "confirmed" | "failed" | "mismatch";
+  blockNumber?: string;
+  blockHash?: string;
+  observedTransfer?: { from: string; to: string; amountBaseUnits: string };
+  reason?: string;
+};
+
+export const verifyUsdcTransfer = async (
+  publicClient: PublicClientLike,
+  input: VerifyUsdcTransferInput
+): Promise<VerifyUsdcTransferResult> => {
+  try {
+    const receipt = await publicClient.getTransactionReceipt({ hash: input.txHash });
+    if (!receipt) {
+      return { status: "pending", reason: "receipt_not_found_yet" };
+    }
+
+    if (
+      receipt.status === "reverted" ||
+      receipt.status === "0x0" ||
+      (receipt as any).status === 0
+    ) {
+      return { status: "failed", reason: "transaction_reverted" };
+    }
+
+    if (
+      receipt.status !== "success" &&
+      receipt.status !== "0x1" &&
+      (receipt as any).status !== 1
+    ) {
+      return { status: "pending", reason: "receipt_pending_or_unconfirmed" };
+    }
+
+    const logs = (receipt as any).logs || [];
+    const expectedToken = (input.tokenAddress || ARC_USDC_ADDRESS).toLowerCase();
+    const expectedTo = input.to.toLowerCase();
+    const expectedFrom = input.from?.toLowerCase();
+
+    // Find Transfer log for expected token
+    const transferLogs = logs.filter((l: any) => {
+      const address = String(l.address || "").toLowerCase();
+      const topics = l.topics || [];
+      return (
+        address === expectedToken &&
+        topics[0]?.toLowerCase() === ERC20_TRANSFER_EVENT_TOPIC.toLowerCase()
+      );
+    });
+
+    if (transferLogs.length === 0) {
+      return {
+        status: "mismatch",
+        reason: "no_erc20_transfer_log_for_token",
+        blockNumber: (receipt as any).blockNumber?.toString(),
+        blockHash: receipt.blockHash ?? undefined
+      };
+    }
+
+    // Inspect transfer log parameters
+    for (const log of transferLogs) {
+      const topics = log.topics || [];
+      const logFrom = topics[1] ? `0x${topics[1].slice(-40)}`.toLowerCase() : "";
+      const logTo = topics[2] ? `0x${topics[2].slice(-40)}`.toLowerCase() : "";
+      const logAmount = log.data && log.data !== "0x" ? BigInt(log.data) : 0n;
+
+      if (logTo === expectedTo) {
+        if (expectedFrom && logFrom !== expectedFrom) {
+          return {
+            status: "mismatch",
+            reason: `sender_mismatch: observed=${logFrom}, expected=${expectedFrom}`,
+            blockNumber: (receipt as any).blockNumber?.toString(),
+            blockHash: receipt.blockHash ?? undefined,
+            observedTransfer: {
+              from: logFrom,
+              to: logTo,
+              amountBaseUnits: logAmount.toString()
+            }
+          };
+        }
+
+        if (logAmount !== input.amountBaseUnits) {
+          return {
+            status: "mismatch",
+            reason: `amount_mismatch: observed=${logAmount.toString()}, expected=${input.amountBaseUnits.toString()}`,
+            blockNumber: (receipt as any).blockNumber?.toString(),
+            blockHash: receipt.blockHash ?? undefined,
+            observedTransfer: {
+              from: logFrom,
+              to: logTo,
+              amountBaseUnits: logAmount.toString()
+            }
+          };
+        }
+
+        return {
+          status: "confirmed",
+          blockNumber: (receipt as any).blockNumber?.toString(),
+          blockHash: receipt.blockHash ?? undefined,
+          observedTransfer: {
+            from: logFrom,
+            to: logTo,
+            amountBaseUnits: logAmount.toString()
+          }
+        };
+      }
+    }
+
+    return {
+      status: "mismatch",
+      reason: "recipient_mismatch_in_transfer_logs",
+      blockNumber: (receipt as any).blockNumber?.toString(),
+      blockHash: receipt.blockHash ?? undefined
+    };
+  } catch (error) {
+    return {
+      status: "pending",
+      reason: error instanceof Error ? error.message : "rpc_lookup_error"
+    };
+  }
+};
+

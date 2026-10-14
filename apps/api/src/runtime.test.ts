@@ -221,3 +221,29 @@ test("getRuntimeHealth reports degraded status when checks fail", async () => {
     globalThis.fetch = originalFetch;
   }
 });
+
+test("checkArcRpc validates remote chain ID against expected chain ID", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    // Simulated remote returns 5042002 (0x4cef52)
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: "0x4cef52" }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      })) as typeof fetch;
+
+    const { checkArcRpc } = await import("./health.ts");
+
+    // Match succeeds
+    const match = await checkArcRpc("https://rpc.testnet.arc.network", 5042002);
+    assert.equal(match.status, "ok");
+
+    // Mismatch fails
+    const mismatch = await checkArcRpc("https://rpc.testnet.arc.network", 5042);
+    assert.equal(mismatch.status, "error");
+    assert.ok(mismatch.detail?.includes("chain_id_mismatch"));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+

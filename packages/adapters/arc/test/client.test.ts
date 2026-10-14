@@ -115,3 +115,82 @@ test("createArcContractClient exposes receipt confirmation and event reads", asy
   assert.equal(receipt.confirmed, true);
   assert.equal(logs.length, 1);
 });
+
+test("verifyUsdcTransfer validates exact token, recipient, sender, and base units", async () => {
+  const { verifyUsdcTransfer, ERC20_TRANSFER_EVENT_TOPIC } = await import("../src/index.ts");
+
+  const validLog = {
+    address: ARC_USDC_ADDRESS,
+    topics: [
+      ERC20_TRANSFER_EVENT_TOPIC,
+      "0x0000000000000000000000001111111111111111111111111111111111111111",
+      "0x0000000000000000000000002222222222222222222222222222222222222222"
+    ],
+    data: "0x0000000000000000000000000000000000000000000000000000000000989680" // 10_000_000n (10 USDC)
+  };
+
+  const mockClient = {
+    async getTransactionReceipt() {
+      return {
+        status: "success",
+        blockNumber: 12345n,
+        blockHash: "0xblock123",
+        logs: [validLog]
+      };
+    }
+  } as never;
+
+  // 1. Exact match returns confirmed
+  const confirmed = await verifyUsdcTransfer(mockClient, {
+    txHash: "0xvalid",
+    from: "0x1111111111111111111111111111111111111111",
+    to: "0x2222222222222222222222222222222222222222",
+    amountBaseUnits: 10_000_000n
+  });
+  assert.equal(confirmed.status, "confirmed");
+  assert.equal(confirmed.observedTransfer?.amountBaseUnits, "10000000");
+
+  // 2. Amount mismatch returns mismatch
+  const amtMismatch = await verifyUsdcTransfer(mockClient, {
+    txHash: "0xvalid",
+    to: "0x2222222222222222222222222222222222222222",
+    amountBaseUnits: 50_000_000n // expecting 50 USDC
+  });
+  assert.equal(amtMismatch.status, "mismatch");
+  assert.ok(amtMismatch.reason?.includes("amount_mismatch"));
+
+  // 3. Recipient mismatch returns mismatch
+  const rcpMismatch = await verifyUsdcTransfer(mockClient, {
+    txHash: "0xvalid",
+    to: "0x3333333333333333333333333333333333333333", // wrong recipient
+    amountBaseUnits: 10_000_000n
+  });
+  assert.equal(rcpMismatch.status, "mismatch");
+
+  // 4. Reverted transaction returns failed
+  const revertedClient = {
+    async getTransactionReceipt() {
+      return { status: "reverted" };
+    }
+  } as never;
+  const failed = await verifyUsdcTransfer(revertedClient, {
+    txHash: "0xrev",
+    to: "0x2222222222222222222222222222222222222222",
+    amountBaseUnits: 10_000_000n
+  });
+  assert.equal(failed.status, "failed");
+
+  // 5. Unmined/pending receipt returns pending
+  const pendingClient = {
+    async getTransactionReceipt() {
+      return null;
+    }
+  } as never;
+  const pending = await verifyUsdcTransfer(pendingClient, {
+    txHash: "0xpending",
+    to: "0x2222222222222222222222222222222222222222",
+    amountBaseUnits: 10_000_000n
+  });
+  assert.equal(pending.status, "pending");
+});
+
