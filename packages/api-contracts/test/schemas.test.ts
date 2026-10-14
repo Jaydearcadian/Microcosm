@@ -64,8 +64,9 @@ test("ApiErrorSchema parses standard error envelope", () => {
     }
   };
   const parsed = ApiErrorSchema.parse(errorObj);
-  assert.equal(parsed.error.code, "recipient_not_found");
-  assert.equal(parsed.error.requestId, "req_12345");
+  assert.ok(typeof parsed.error === "object" && parsed.error !== null);
+  assert.equal((parsed.error as { code: string }).code, "recipient_not_found");
+  assert.equal((parsed.error as { requestId?: string }).requestId, "req_12345");
 });
 
 test("MeResponseSchema validates stable internal principal, identities, and active space", () => {

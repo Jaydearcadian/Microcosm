@@ -9,6 +9,11 @@ export type Envelope = {
     startHourUtc: number;
     endHourUtc: number;
   };
+  name?: string;
+  spaceId?: string;
+  ownerUserId?: string;
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 export type PaymentIntent = {

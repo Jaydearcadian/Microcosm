@@ -5,6 +5,13 @@ export type ResolvedRecipient = {
   walletAddress?: string;
   claimStatus: "claimed" | "pending-claim";
   lookupKey: string;
+  spaceId?: string;
+  ownerUserId?: string;
+  recipientType?: "wallet" | "email" | "handle" | "agent";
+  displayLabel?: string;
+  status?: "active" | "archived";
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 export type RecipientResolutionInput = {

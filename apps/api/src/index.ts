@@ -205,6 +205,14 @@ export const createApiApp = (
         persist();
         return recipient;
       },
+      create(input: Parameters<NonNullable<typeof identity.createRecipient>>[0]) {
+        if (!identity.createRecipient) {
+          throw new Error("createRecipient not implemented");
+        }
+        const recipient = identity.createRecipient(input);
+        persist();
+        return recipient;
+      },
       list: identity.listRecipients
     },
     users: {

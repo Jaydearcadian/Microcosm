@@ -25,6 +25,9 @@ export type SpaceService = {
   requireActiveMembership: (userId: string, spaceId: string) => Promise<SpaceMembership>;
   assertSpaceOwnership: (userId: string, spaceId: string) => Promise<void>;
   revokeMembership: (userId: string, spaceId: string) => Promise<void>;
+  createSpace?: (userId: string, input: { name: string; type?: "personal" | "shared" }) => Promise<Space>;
+  addMember?: (input: { spaceId: string; userId: string; role: SpaceMembership["role"] }) => Promise<SpaceMembership>;
+  getMembership?: (userId: string, spaceId: string) => Promise<SpaceMembership | undefined>;
 };
 
 export const createSpaceService = (): SpaceService => {
@@ -107,6 +110,48 @@ export const createSpaceService = (): SpaceService => {
         membership.status = "revoked";
         memberships.set(key, structuredClone(membership));
       }
+    },
+
+    async createSpace(userId: string, input: { name: string; type?: "personal" | "shared" }): Promise<Space> {
+      const now = new Date().toISOString();
+      const id = `spc_${randomBytes(8).toString("hex")}`;
+      const newSpace: Space = {
+        id,
+        type: input.type ?? "shared",
+        name: input.name,
+        ownerUserId: userId,
+        status: "active",
+        createdAt: now,
+        updatedAt: now
+      };
+      const ownerMembership: SpaceMembership = {
+        spaceId: id,
+        userId,
+        role: "owner",
+        status: "active",
+        createdAt: now
+      };
+      spaces.set(id, structuredClone(newSpace));
+      memberships.set(membershipKey(id, userId), structuredClone(ownerMembership));
+      return structuredClone(newSpace);
+    },
+
+    async addMember(input: { spaceId: string; userId: string; role: SpaceMembership["role"] }): Promise<SpaceMembership> {
+      const now = new Date().toISOString();
+      const membership: SpaceMembership = {
+        spaceId: input.spaceId,
+        userId: input.userId,
+        role: input.role,
+        status: "active",
+        createdAt: now
+      };
+      memberships.set(membershipKey(input.spaceId, input.userId), structuredClone(membership));
+      return structuredClone(membership);
+    },
+
+    async getMembership(userId: string, spaceId: string): Promise<SpaceMembership | undefined> {
+      const membership = memberships.get(membershipKey(spaceId, userId));
+      return membership ? structuredClone(membership) : undefined;
     }
   };
 };

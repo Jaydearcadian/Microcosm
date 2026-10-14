@@ -90,9 +90,31 @@ Following the implementation of server-side Privy session verification, canonica
 ### 3. `npm run build --workspace=@mcosm/web`
 - **Status:** **PASS** (Next.js production build succeeded; static routes `/` and `/_not-found` generated cleanly).
 
+## 6. Versioned Route Dispatcher & Tenant Isolation Authorization (Plan 1 Task 6)
+
+**Date:** 2026-10-14  
+Following the implementation of the centralized `/v1` route dispatcher and principal/space tenant isolation layer (`apps/api/src/dispatcher.ts`, `apps/api/src/server.ts`, `apps/api/src/auth.ts`):
+
+### 1. `npm test`
+- **Status:** **LOCAL_PASS** (**103 passing, 0 failing**, duration ~7.3s)
+- **Coverage Highlights:**
+  - `apps/api/src/dispatcher.test.ts`: Added comprehensive adversarial and isolation test suite validating all 5 release gates:
+    - **Gate 1 (Route coverage & method validation):** Verified `/v1` endpoints (`/v1/me`, `/v1/spaces`, `/v1/spaces/:id`, `/v1/balance`, `/v1/wallet`, `/v1/recipients`, `/v1/recipients/resolve`, `/v1/recipients/:id`, `/v1/recipients/:id/claim`, `/v1/envelopes`, `/v1/envelopes/:id`, `/v1/intents`, `/v1/intents/:id`, `/v1/payments`, `/v1/payments/prepare`, `/v1/payments/submission`, `/v1/payments/:id`, `/v1/payments/:id/submission`, `/v1/payments/:id/execute`, `/v1/payments/:id/execute-async`, `/v1/payments/:id/claim`, `/v1/activity`). Verified 405 Method Not Allowed with standard `Allow` header on unsupported methods (e.g. `DELETE /v1/me`, `POST /v1/balance`), 404 `route_not_found` on unknown routes, 413 `payload_too_large` on bodies exceeding 100KB, and 400 `invalid_json` on malformed bodies.
+    - **Gate 2 (Caller-controlled ownership rejection):** Tested rejection of top-level spoofed `userId` or `ownerUserId` (403 `identity_mismatch`), nested spoofed ownership inside body metadata (403 `identity_mismatch`), conflicting `x-principal-id` header (403 `identity_mismatch`), and unauthorized `spaceId` in request bodies (404 `space_not_found`).
+    - **Gate 3 (Tenant isolation & non-leaking boundary):** Verified Principal A cannot read, mutate, or discover Principal B's space (404 `space_not_found`), envelopes (404 `envelope_not_found`), recipients (404 `recipient_not_found`), intents (404 `intent_not_found`), or payments (404 `payment_not_found`). Non-leaking 404 policy verified across all resources.
+    - **Gate 4 (Cross-tenant reference & role authorization):** Verified cross-tenant nested references are rejected (e.g. intent in Space A referencing recipient or envelope in Space B -> 404 `recipient_not_found` / `envelope_not_found`). Verified non-owner member attempting owner-only actions (`DELETE /v1/spaces/:id`) returns 403 `forbidden`. Verified viewer attempting payment execution returns 403 `forbidden`. Verified revoked/suspended membership returns 403 `forbidden`.
+    - **Gate 5 (Payment stage separation):** Verified payment preparation (`POST /v1/payments/prepare`) returns calldata with `value: "0"` for client signing without executing transactions. Verified submission and execution stages remain decoupled.
+
+### 2. `npm run typecheck`
+- **Status:** **LOCAL_PASS** (0 errors across root, apps, packages, and web workspace).
+
+### 3. `npm run build --workspace=@mcosm/web`
+- **Status:** **LOCAL_PASS** (Next.js production build succeeded with Turbopack/Webpack; static routes `/` and `/_not-found` generated cleanly).
+
 ### 4. Verification Distinctions (Deterministic Local Mocks vs. Live Services)
-- **Deterministic Cryptographic Verification (Local):** **PASS** — Verified with RFC 7515/7519 compliant ES256 key pairs via `jose` and `@privy-io/node`'s `client.utils().auth().verifyAccessToken` and `verifyAccessToken`.
-- **Live Privy Cloud Credential Verification:** **NOT RUN** — Live JWT exchange against Privy's remote JWKS endpoint (`auth.privy.io`) is gated behind live credentials.
-- **Live PostgreSQL Database Connection:** **NOT RUN** — In-memory identity and space services utilized for API unit tests; live PostgreSQL persistence will be verified under Plan 1 Task 7.
+- **Deterministic Cryptographic Verification (Local):** **LOCAL_PASS** — Verified with RFC 7515/7519 compliant ES256 key pairs via `jose` and `@privy-io/node` verifier.
+- **Live Privy Cloud Credential Verification:** **NOT RUN** — Live JWT exchange against Privy's remote JWKS endpoint (`auth.privy.io`) is gated behind live production credentials.
+- **Live PostgreSQL Database Connection:** **NOT RUN** — In-memory identity, spaces, and application state services utilized for API unit tests; live PostgreSQL persistence will be verified under Plan 1 Task 7.
+- **Live Arc Mainnet / Testnet RPC Transactions:** **NOT RUN** — Synthetic JSON-RPC mocks used locally; live chain submission gated for Plan 3.
 
 

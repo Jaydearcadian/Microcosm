@@ -132,6 +132,15 @@ export type IdentityService = {
     input: ClaimRecipientInput
   ) => Promise<ResolvedRecipient>;
   listRecipients: () => ResolvedRecipient[];
+  createRecipient?: (input: {
+    id?: string;
+    spaceId: string;
+    ownerUserId: string;
+    recipientType: "wallet" | "email" | "handle" | "agent";
+    displayLabel: string;
+    address?: string;
+    status?: "active" | "archived";
+  }) => ResolvedRecipient;
   listUsers: () => UserRecord[];
   exportState: () => IdentityState;
   hydrate: (state: Partial<IdentityState>) => void;
@@ -338,6 +347,28 @@ export const createIdentityService = ({
       return structuredClone(claimedRecipient);
     },
     listRecipients: () => [...recipients.values()].map((recipient) => structuredClone(recipient)),
+    createRecipient(input) {
+      const id = input.id ?? `rcp_${randomBytes(8).toString("hex")}`;
+      const now = new Date().toISOString();
+      const normAddr = input.address ? normalizeWallet(input.address) : undefined;
+      const recipient: ResolvedRecipient = {
+        id,
+        ownerType: "user",
+        ownerId: input.ownerUserId,
+        ownerUserId: input.ownerUserId,
+        spaceId: input.spaceId,
+        recipientType: input.recipientType,
+        displayLabel: input.displayLabel,
+        walletAddress: normAddr,
+        claimStatus: normAddr ? "claimed" : "pending-claim",
+        lookupKey: normAddr ?? input.displayLabel,
+        status: input.status ?? "active",
+        createdAt: now,
+        updatedAt: now
+      };
+      recipients.set(id, structuredClone(recipient));
+      return structuredClone(recipient);
+    },
     listUsers: () => [...users.values()].map((user) => structuredClone(user)),
     exportState() {
       return {

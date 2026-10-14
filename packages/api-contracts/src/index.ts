@@ -27,16 +27,19 @@ export const ApiErrorDetailsSchema = z
   .object({
     code: z.string(),
     message: z.string(),
-    requestId: z.string(),
+    requestId: z.string().optional(),
     details: z.record(z.string(), z.unknown()).optional()
-  })
-  .strict();
+  });
 
 export const ApiErrorSchema = z
   .object({
-    error: ApiErrorDetailsSchema
-  })
-  .strict();
+    error: z.union([z.string(), ApiErrorDetailsSchema]),
+    code: z.string().optional(),
+    message: z.string().optional(),
+    requestId: z.string().optional(),
+    detail: z.string().optional(),
+    details: z.record(z.string(), z.unknown()).optional()
+  });
 
 // Identity & Space
 export const UserStatusSchema = z.enum(["active", "suspended", "deletion_pending"]);

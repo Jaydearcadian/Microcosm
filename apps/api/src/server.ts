@@ -14,6 +14,8 @@ import {
   type PrivyTokenVerifier
 } from "../../../packages/adapters/privy/src/index.ts";
 
+import { dispatchV1Request } from "./dispatcher.ts";
+
 export type ApiServerOptions = Parameters<typeof createApiAppAsync>[0] & {
   auth?: {
     verifier?: PrivyTokenVerifier;
@@ -87,6 +89,22 @@ export const createApiServer = (
           arcRpcUrl: config.arcRpcUrl
         });
         return sendJson(response, report.status === "ok" ? 200 : 503, report);
+      }
+
+      // Delegate all /v1 endpoints to the centralized versioned dispatcher
+      if (url.pathname.startsWith("/v1")) {
+        const handled = await dispatchV1Request({
+          request,
+          response,
+          app,
+          verifier,
+          options: {
+            verifier
+          }
+        });
+        if (handled) {
+          return;
+        }
       }
 
       // Authenticate and authorize protected routes

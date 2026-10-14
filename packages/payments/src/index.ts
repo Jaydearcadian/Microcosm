@@ -10,6 +10,15 @@ export type CreatePaymentInput = {
   amount: string;
   asset: string;
   recipient: ResolvedRecipient;
+  spaceId?: string;
+  ownerUserId?: string;
+  senderAddress?: string;
+  recipientAddress?: string;
+  chainId?: number;
+  tokenAddress?: string;
+  amountDecimal?: string;
+  amountBaseUnits?: string;
+  txHash?: string;
 };
 
 export type PaymentRecord = {
@@ -18,7 +27,18 @@ export type PaymentRecord = {
   amount: string;
   asset: string;
   recipientId: string;
-  status: "ready_for_settlement" | "pending_claim" | "settled" | "claimed";
+  status: "ready_for_settlement" | "pending_claim" | "settled" | "claimed" | "submitted" | "failed";
+  spaceId?: string;
+  ownerUserId?: string;
+  senderAddress?: string;
+  recipientAddress?: string;
+  chainId?: number;
+  tokenAddress?: string;
+  amountDecimal?: string;
+  amountBaseUnits?: string;
+  txHash?: string;
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 export type PaymentCreationResult = {
@@ -94,6 +114,7 @@ export const createPaymentService = ({
         recipient: input.recipient
       });
 
+      const now = new Date().toISOString();
       const payment: PaymentRecord = {
         id: paymentId,
         intentId: input.intentId,
@@ -103,7 +124,18 @@ export const createPaymentService = ({
         status:
           settlementPlan.mode === "claimable"
             ? "pending_claim"
-            : "ready_for_settlement"
+            : "ready_for_settlement",
+        spaceId: input.spaceId,
+        ownerUserId: input.ownerUserId,
+        senderAddress: input.senderAddress,
+        recipientAddress: input.recipientAddress,
+        chainId: input.chainId,
+        tokenAddress: input.tokenAddress,
+        amountDecimal: input.amountDecimal,
+        amountBaseUnits: input.amountBaseUnits,
+        txHash: input.txHash,
+        createdAt: now,
+        updatedAt: now
       };
 
       payments.push(payment);

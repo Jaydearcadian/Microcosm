@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import type { IncomingHttpHeaders } from "node:http";
 import type { UserRecord, IdentityService } from "../../../packages/identity/src/index.ts";
 import type { Space, SpaceMembership, SpaceService } from "../../../packages/spaces/src/index.ts";
@@ -7,20 +8,31 @@ export class AuthError extends Error {
   readonly status: number;
   readonly code: string;
   readonly detail?: string;
+  requestId: string;
 
-  constructor(status: number, code: string, message: string, detail?: string) {
+  constructor(
+    status: number,
+    code: string,
+    message: string,
+    detail?: string,
+    requestId?: string
+  ) {
     super(message);
     this.name = "AuthError";
     this.status = status;
     this.code = code;
     this.detail = detail;
+    this.requestId = requestId ?? `req_${randomBytes(8).toString("hex")}`;
   }
 
   toJSON() {
     return {
       error: this.code,
+      code: this.code,
+      message: this.message,
       detail: this.detail ?? this.message,
-      code: this.code
+      requestId: this.requestId,
+      details: this.detail ? { detail: this.detail } : undefined
     };
   }
 }
@@ -211,6 +223,18 @@ export const authenticateAndAuthorize = async (
     throw new AuthError(404, "space_not_found", "Requested space not found");
   }
 
+  const existingMembership = options.spaceService.getMembership
+    ? await options.spaceService.getMembership(user.id, requestedSpaceId)
+    : undefined;
+
+  if (existingMembership && existingMembership.status !== "active") {
+    throw new AuthError(
+      403,
+      "forbidden",
+      `Active membership required: membership is ${existingMembership.status}`
+    );
+  }
+
   let membership: SpaceMembership;
   try {
     membership = await options.spaceService.requireActiveMembership(
@@ -239,3 +263,36 @@ export const authenticateAndAuthorize = async (
     membership
   };
 };
+
+export const validateCallerOwnership = (
+  value: unknown,
+  expectedPrincipalId: string,
+  path = ""
+): void => {
+  if (value === null || typeof value !== "object") {
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i++) {
+      validateCallerOwnership(value[i], expectedPrincipalId, `${path}[${i}]`);
+    }
+    return;
+  }
+  const obj = value as Record<string, unknown>;
+  const ownershipKeys = ["ownerUserId", "principalId", "userId"];
+  for (const key of ownershipKeys) {
+    if (key in obj && obj[key] !== undefined && obj[key] !== null) {
+      if (typeof obj[key] === "string" && obj[key] !== expectedPrincipalId) {
+        throw new AuthError(
+          403,
+          "identity_mismatch",
+          `Client-supplied ownership field '${key}' does not match authenticated principal`
+        );
+      }
+    }
+  }
+  for (const [k, v] of Object.entries(obj)) {
+    validateCallerOwnership(v, expectedPrincipalId, path ? `${path}.${k}` : k);
+  }
+};
+

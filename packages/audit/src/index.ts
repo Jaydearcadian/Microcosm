@@ -6,6 +6,8 @@ export type AuditEvent = {
   objectType: string;
   objectId: string;
   payload: Record<string, unknown>;
+  spaceId?: string;
+  timestamp?: string;
 };
 
 export type AuditStore = {

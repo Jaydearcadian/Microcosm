@@ -10,6 +10,17 @@ export type CreateIntentInput = {
   asset: string;
   executedAt: string;
   spentToday: string;
+  spaceId?: string;
+  ownerUserId?: string;
+  recipientAddress?: string;
+  tokenAddress?: string;
+  chainId?: number;
+  amountDecimal?: string;
+  amountBaseUnits?: string;
+  purposeMetadata?: Record<string, unknown>;
+  idempotencyKey?: string;
+  expiresAt?: string;
+  createdAt?: string;
 };
 
 export type PaymentIntentRecord = CreateIntentInput & {
