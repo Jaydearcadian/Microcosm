@@ -70,5 +70,6 @@ npm-debug.log*
 checkpoints/
 output/
 .vercel
+.skills/
 .env*
 *.tsbuildinfo

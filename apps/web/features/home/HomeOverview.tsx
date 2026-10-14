@@ -6,6 +6,8 @@ import { useSession } from "../identity/IdentityProvider.tsx";
 import { PageHeader } from "../../components/PageHeader.tsx";
 import { NetworkStatus } from "../wallet/NetworkStatus.tsx";
 import { WalletSummary } from "../wallet/WalletSummary.tsx";
+import { EnvelopeVaultList } from "../envelopes/EnvelopeVaultList.tsx";
+import { AgentManager } from "../agents/AgentManager.tsx";
 
 export const HomeOverview: React.FC = () => {
   const { ready, authenticated, user, activeSpace, login, logout } = useSession();
@@ -47,6 +49,10 @@ export const HomeOverview: React.FC = () => {
       {authenticated ? (
         <>
           <WalletSummary />
+
+          {/* Envelopes & Agent Guardrails */}
+          <EnvelopeVaultList />
+          <AgentManager />
 
           <div className="card">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
