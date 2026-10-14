@@ -15,29 +15,28 @@ This file should be treated as the current status ledger for the codebase.
 
 ## 2. Current Overall State
 
-Microcosm is no longer just a concept or document set. It now contains a working backend skeleton with real runtime code, real package boundaries, real tests, and real integration entrypoints for Arc and Privy.
+Microcosm v0.1 is fully implemented, verified, deployed, and submitted for the Arc Microgrants release:
 
-What exists today is best described as:
-
-- a working backend foundation
-- a partially persistent identity and recipient system
-- a policy and payment orchestration layer
-- a partially real Arc settlement path
-- a real HTTP server with basic routes
-- a complete documentation foundation for continuing development on a normal PC
-
-What does not exist yet is a fully operational testnet product. The repository is still missing the infrastructure and domain completion work required for that.
+- **Public Repository:** https://github.com/Jaydearcadian/Microcosm
+- **Live Consumer Web Application:** https://charcoal-brown.vercel.app
+- **Production-Ready Multi-Tenant Architecture:** Canonical identity decoupled from login methods, Space isolation, viewer permissions, cryptographic EIP-191 wallet linking.
+- **Fail-Closed Arc Settlement:** Non-custodial client wallet signing, zero custodial server keys for consumer routes, official Arc USDC contract (`0x3600000000000000000000000000000000000000`), integer base-unit validation (`BigInt`), independent onchain receipt verification.
+- **Live Onchain Verification:** Live testnet transaction executed on Arc Testnet (chain ID 5042002, block 67174208, tx `0xb9ff68b720ccc128a8791435979dd08b50ea16d189df212a0e4a256b321be408`).
+- **Closed Release Gates:** G0 (Identity & Authorization), G1 (Consumer Settlement Safety), G2 (Responsive Consumer Web UI), G3 (Live Arc Settlement Verification), G4 (Deployment & Documentation).
 
 ## 3. Verified Working State
 
-The following is currently true in the repository:
+The following is verified true in the repository:
 
-- `npm run typecheck` passes
-- `npm test` passes
-- `forge test` passes in `packages/contracts`
-- the test suite currently covers 69 JS and TS test cases plus 2 Foundry tests
-- the async API app can initialize
-- health and readiness checks exist
+- `npm run typecheck` passes (0 errors across root, packages, API, worker, and web app)
+- `npm test` passes (133 of 133 automated test cases passing)
+- `npm run build --workspace=@mcosm/web` passes (all 9 Next.js static pages generated)
+- Vercel production deployment is live and serving HTTP 200 at `https://charcoal-brown.vercel.app`
+- GitHub repository is public at `https://github.com/Jaydearcadian/Microcosm`
+- Adversarial authorization review passed (closed gates G0 & G1)
+- Live onchain settlement confirmed via `verifyUsdcTransfer` on Arc Testnet
+- Async API app initializes with fail-closed chain ID and RPC verification
+- PostgreSQL schema, migrations, concurrency locks (`FOR UPDATE SKIP LOCKED`), and idempotency persistence verified
 - Arc RPC health checks work
 - Privy runtime configuration checks work
 - Postgres runtime integration code exists
