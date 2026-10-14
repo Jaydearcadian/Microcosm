@@ -123,9 +123,14 @@ export type IdentityRepository = {
   }) => Promise<IdentityResolution>;
   saveWalletLinkChallenge?: (challenge: WalletLinkChallenge) => Promise<void>;
   consumeWalletLinkChallenge?: (challengeId: string) => Promise<boolean>;
+  getWalletLinkChallenge?: (challengeId: string) => Promise<WalletLinkChallenge | undefined>;
 };
 
 export type IdentityService = {
+  repository?: IdentityRepository;
+  saveWalletLinkChallenge?: (challenge: WalletLinkChallenge) => Promise<void>;
+  getWalletLinkChallenge?: (challengeId: string) => Promise<WalletLinkChallenge | undefined>;
+  consumeWalletLinkChallenge?: (challengeId: string) => Promise<boolean>;
   resolveRecipient: (input: RecipientResolutionInput) => ResolvedRecipient;
   getRecipient: (id: string) => ResolvedRecipient | undefined;
   getUserByPrivyUserId: (privyUserId: string) => UserRecord | undefined;
@@ -166,6 +171,10 @@ export const createIdentityService = ({
 } = {}): IdentityService => {
   const users = new Map<string, UserRecord>();
   const recipients = new Map<string, ResolvedRecipient>();
+  const inMemoryChallenges = new Map<
+    string,
+    WalletLinkChallenge & { consumedAt?: string }
+  >();
 
   const nextUserId = () =>
     `usr_${
@@ -200,6 +209,32 @@ export const createIdentityService = ({
   };
 
   return {
+    repository,
+    async saveWalletLinkChallenge(challenge: WalletLinkChallenge) {
+      if (repository?.saveWalletLinkChallenge) {
+        await repository.saveWalletLinkChallenge(challenge);
+        return;
+      }
+      inMemoryChallenges.set(challenge.id, structuredClone(challenge));
+    },
+    async getWalletLinkChallenge(challengeId: string) {
+      if (repository?.getWalletLinkChallenge) {
+        return repository.getWalletLinkChallenge(challengeId);
+      }
+      const chg = inMemoryChallenges.get(challengeId);
+      return chg ? structuredClone(chg) : undefined;
+    },
+    async consumeWalletLinkChallenge(challengeId: string) {
+      if (repository?.consumeWalletLinkChallenge) {
+        return repository.consumeWalletLinkChallenge(challengeId);
+      }
+      const chg = inMemoryChallenges.get(challengeId);
+      if (!chg || chg.consumedAt || new Date(chg.expiresAt).getTime() <= Date.now()) {
+        return false;
+      }
+      chg.consumedAt = new Date().toISOString();
+      return true;
+    },
     resolveRecipient(input) {
       if (input.email) {
         const lookupKey = normalizeEmail(input.email);

@@ -89,6 +89,14 @@ export type AppStateRepository = {
     key: string
   ) => Promise<IdempotencyRecord | undefined>;
   saveIdempotencyRecord?: (record: IdempotencyRecord) => Promise<void>;
+  getEnvelope?: (id: string, spaceId: string) => Promise<Envelope | undefined>;
+  listEnvelopes?: (spaceId: string) => Promise<Envelope[]>;
+  getIntent?: (id: string, spaceId: string) => Promise<PaymentIntentRecord | undefined>;
+  listIntents?: (spaceId: string) => Promise<PaymentIntentRecord[]>;
+  getPayment?: (id: string, spaceId: string) => Promise<PersistedPaymentState | undefined>;
+  listPayments?: (spaceId: string) => Promise<PersistedPaymentState[]>;
+  listAuditEvents?: (spaceId: string) => Promise<AuditEvent[]>;
+  listRecipients?: (spaceId: string) => Promise<ResolvedRecipient[]>;
 };
 
 export type PostgresAppRepository = IdentityRepository & AppStateRepository;
@@ -240,6 +248,27 @@ export const createPostgresIdentityRepository = ({
       [challengeId]
     );
     return res.rows.length === 1;
+  },
+  async getWalletLinkChallenge(
+    challengeId: string
+  ): Promise<WalletLinkChallenge | undefined> {
+    const res = await client.query(
+      `select id, user_id, space_id, address, nonce, message, expires_at
+       from wallet_link_challenges
+       where id = $1`,
+      [challengeId]
+    );
+    if (res.rows.length === 0) return undefined;
+    const row = res.rows[0]!;
+    return {
+      id: String(row.id),
+      userId: String(row.user_id),
+      spaceId: String(row.space_id),
+      address: String(row.address) as `0x${string}`,
+      nonce: String(row.nonce),
+      message: String(row.message),
+      expiresAt: new Date(row.expires_at as string).toISOString()
+    };
   }
 });
 
@@ -820,8 +849,8 @@ export const createPostgresAppRepository = ({
        values ($1, $2, $3, $4, $5, $6::jsonb)
        on conflict (principal_id, route, key) do update
        set request_hash = excluded.request_hash,
-           status_code = excluded.status_code,
-           response_body = excluded.response_body`,
+       status_code = excluded.status_code,
+       response_body = excluded.response_body`,
       [
         record.key,
         record.principalId,
@@ -831,6 +860,71 @@ export const createPostgresAppRepository = ({
         JSON.stringify(record.responseBody)
       ]
     );
+  },
+  async getEnvelope(id: string, spaceId: string): Promise<Envelope | undefined> {
+    const res = await client.query(
+      "select data from envelopes where id = $1 and space_id = $2",
+      [id, spaceId]
+    );
+    if (res.rows.length === 0) return undefined;
+    return parseJsonColumn<Envelope>(res.rows[0]!.data);
+  },
+  async listEnvelopes(spaceId: string): Promise<Envelope[]> {
+    const res = await client.query(
+      "select data from envelopes where space_id = $1 order by created_at asc",
+      [spaceId]
+    );
+    return res.rows.map((row) => parseJsonColumn<Envelope>(row.data));
+  },
+  async getIntent(id: string, spaceId: string): Promise<PaymentIntentRecord | undefined> {
+    const res = await client.query(
+      "select data from intents where id = $1 and space_id = $2",
+      [id, spaceId]
+    );
+    if (res.rows.length === 0) return undefined;
+    return parseJsonColumn<PaymentIntentRecord>(res.rows[0]!.data);
+  },
+  async listIntents(spaceId: string): Promise<PaymentIntentRecord[]> {
+    const res = await client.query(
+      "select data from intents where space_id = $1 order by created_at asc",
+      [spaceId]
+    );
+    return res.rows.map((row) => parseJsonColumn<PaymentIntentRecord>(row.data));
+  },
+  async getPayment(id: string, spaceId: string): Promise<PersistedPaymentState | undefined> {
+    const res = await client.query(
+      "select payment_data, settlement_data from payments where id = $1 and space_id = $2",
+      [id, spaceId]
+    );
+    if (res.rows.length === 0) return undefined;
+    return {
+      payment: parseJsonColumn<PersistedPaymentState["payment"]>(res.rows[0]!.payment_data),
+      settlement: parseJsonColumn<PersistedPaymentState["settlement"]>(res.rows[0]!.settlement_data)
+    };
+  },
+  async listPayments(spaceId: string): Promise<PersistedPaymentState[]> {
+    const res = await client.query(
+      "select payment_data, settlement_data from payments where space_id = $1 order by created_at asc",
+      [spaceId]
+    );
+    return res.rows.map((row) => ({
+      payment: parseJsonColumn<PersistedPaymentState["payment"]>(row.payment_data),
+      settlement: parseJsonColumn<PersistedPaymentState["settlement"]>(row.settlement_data)
+    }));
+  },
+  async listAuditEvents(spaceId: string): Promise<AuditEvent[]> {
+    const res = await client.query(
+      "select data from audit_events where space_id = $1 order by created_at asc",
+      [spaceId]
+    );
+    return res.rows.map((row) => parseJsonColumn<AuditEvent>(row.data));
+  },
+  async listRecipients(spaceId: string): Promise<ResolvedRecipient[]> {
+    const res = await client.query(
+      "select id, lookup_key, owner_type, owner_id, wallet_address, claim_status, space_id from recipients where space_id = $1 order by created_at asc",
+      [spaceId]
+    );
+    return res.rows.map(mapRecipientRow);
   }
 });
 

@@ -70,6 +70,7 @@ type CreateApiAppOptions = {
         destination: string;
       }
     ) => Promise<{ txHash?: string }>;
+    confirmer?: (txHash: string) => Promise<{ confirmed: boolean; checkedAt?: string }>;
   };
   identity?: {
     initialState?: Partial<IdentityState>;
@@ -504,7 +505,8 @@ export const createApiApp = (
       }
     },
     spaces,
-    notifications
+    notifications,
+    confirmer: options.settlement?.confirmer
   };
 };
 

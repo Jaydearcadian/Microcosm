@@ -9,6 +9,11 @@ import {
 } from "./auth.ts";
 import type { createApiAppAsync } from "./index.ts";
 import type { PrivyTokenVerifier } from "../../../packages/adapters/privy/src/index.ts";
+import {
+  createWalletLinkChallenge,
+  verifyWalletLinkChallenge,
+  type WalletLinkChallenge
+} from "../../../packages/identity/src/index.ts";
 
 export type ApiApp = Awaited<ReturnType<typeof createApiAppAsync>>;
 
@@ -18,6 +23,24 @@ export type DispatcherOptions = {
 };
 
 export const MAX_BODY_BYTES = 100 * 1024; // 100KB limit for API payloads
+
+export const rejectViewer = (
+  authContext: AuthenticatedContext,
+  action: string,
+  requestId: string,
+  response: ServerResponse
+): boolean => {
+  if (authContext.membership.role === "viewer") {
+    sendJson(response, 403, {
+      error: "forbidden",
+      code: "forbidden",
+      message: `Viewer role not permitted to ${action}`,
+      requestId
+    });
+    return true;
+  }
+  return false;
+};
 
 export const sendJson = (
   response: ServerResponse,
@@ -301,6 +324,152 @@ export const routeTable: RouteDefinition[] = [
     }
   },
 
+  // 5a. /v1/wallet/challenge
+  {
+    pattern: /^\/v1\/wallet\/challenge$/,
+    allowedMethods: ["POST"],
+    handler: async ({ response, app, authContext, body, requestId }) => {
+      if (rejectViewer(authContext, "link wallets", requestId, response)) {
+        return;
+      }
+      const address = body.address as string;
+      if (!address || typeof address !== "string" || !/^0x[a-fA-F0-9]{40}$/.test(address)) {
+        return sendJson(response, 400, {
+          error: "invalid_address",
+          code: "invalid_address",
+          message: "A valid EVM address is required",
+          requestId
+        });
+      }
+
+      const challenge = createWalletLinkChallenge({
+        userId: authContext.principal.id,
+        spaceId: authContext.space.id,
+        address
+      });
+
+      if (app.identity.saveWalletLinkChallenge) {
+        await app.identity.saveWalletLinkChallenge(challenge);
+      }
+
+      return sendJson(response, 201, { challenge });
+    }
+  },
+
+  // 5b. /v1/wallet/link
+  {
+    pattern: /^\/v1\/wallet\/link$/,
+    allowedMethods: ["POST"],
+    handler: async ({ response, app, authContext, body, requestId }) => {
+      if (rejectViewer(authContext, "link wallets", requestId, response)) {
+        return;
+      }
+      const challengeId = body.challengeId as string;
+      const signature = body.signature as string;
+
+      if (!challengeId || !signature) {
+        return sendJson(response, 400, {
+          error: "missing_parameter",
+          code: "missing_parameter",
+          message: "challengeId and signature are required",
+          requestId
+        });
+      }
+
+      let challenge: WalletLinkChallenge | undefined;
+      if (app.identity.getWalletLinkChallenge) {
+        challenge = await app.identity.getWalletLinkChallenge(challengeId);
+      }
+
+      if (!challenge) {
+        return sendJson(response, 404, {
+          error: "challenge_not_found",
+          code: "challenge_not_found",
+          message: "Wallet link challenge not found",
+          requestId
+        });
+      }
+
+      // Check tenant isolation: challenge must match authenticated principal and space
+      if (challenge.userId !== authContext.principal.id || challenge.spaceId !== authContext.space.id) {
+        return sendJson(response, 403, {
+          error: "identity_mismatch",
+          code: "identity_mismatch",
+          message: "Challenge does not belong to the authenticated principal or space",
+          requestId
+        });
+      }
+
+      // Cryptographic signature verification
+      const isValid = await verifyWalletLinkChallenge({
+        challenge,
+        signature
+      });
+
+      if (!isValid) {
+        return sendJson(response, 400, {
+          error: "invalid_signature",
+          code: "invalid_signature",
+          message: "Cryptographic signature verification failed",
+          requestId
+        });
+      }
+
+      // Consume challenge atomically (at most once)
+      if (app.identity.consumeWalletLinkChallenge) {
+        const consumed = await app.identity.consumeWalletLinkChallenge(challengeId);
+        if (!consumed) {
+          return sendJson(response, 409, {
+            error: "challenge_already_consumed",
+            code: "challenge_already_consumed",
+            message: "Challenge has already been consumed or has expired",
+            requestId
+          });
+        }
+      }
+
+      // Update principal's wallet
+      authContext.principal.walletAddress = challenge.address;
+      await (app.identity as any).repository?.upsertUser?.({
+        id: authContext.principal.id,
+        email: authContext.principal.email,
+        privyUserId: authContext.principal.privyUserId,
+        walletAddress: challenge.address
+      });
+
+      app.audit.record?.({
+        id: `aud_wallet_${Date.now()}`,
+        actorType: "user",
+        actorId: authContext.principal.id,
+        eventType: "wallet.linked",
+        objectType: "wallet",
+        objectId: `wb_${authContext.principal.id}`,
+        spaceId: authContext.space.id,
+        payload: {
+          address: challenge.address,
+          verification: "signature_verified"
+        }
+      });
+
+      return sendJson(response, 200, {
+        ok: true,
+        wallet: {
+          id: `wb_${authContext.principal.id}`,
+          userId: authContext.principal.id,
+          spaceId: authContext.space.id,
+          address: challenge.address,
+          chainType: "evm",
+          chainId: 5042,
+          role: "primary",
+          provider: "external",
+          verification: "signature_verified",
+          status: "active",
+          createdAt: new Date().toISOString()
+        }
+      });
+    }
+  },
+
   // 6. /v1/recipients/resolve
   {
     pattern: /^\/v1\/recipients\/resolve$/,
@@ -319,7 +488,7 @@ export const routeTable: RouteDefinition[] = [
   {
     pattern: /^\/v1\/recipients$/,
     allowedMethods: ["GET", "POST"],
-    handler: async ({ method, response, app, authContext, body }) => {
+    handler: async ({ method, response, app, authContext, body, requestId }) => {
       if (method === "GET") {
         const allRecipients = await app.recipients.list();
         const spaceRecipients = allRecipients.filter(
@@ -328,6 +497,9 @@ export const routeTable: RouteDefinition[] = [
         return sendJson(response, 200, spaceRecipients);
       }
       if (method === "POST") {
+        if (rejectViewer(authContext, "create recipients", requestId, response)) {
+          return;
+        }
         const recipientType =
           (body.recipientType as "wallet" | "email" | "handle" | "agent") ||
           (body.address ? "wallet" : "email");
@@ -369,6 +541,9 @@ export const routeTable: RouteDefinition[] = [
     pattern: /^\/v1\/recipients\/([^/]+)\/claim$/,
     allowedMethods: ["POST"],
     handler: async ({ response, app, authContext, params, body, requestId }) => {
+      if (rejectViewer(authContext, "claim recipients", requestId, response)) {
+        return;
+      }
       const recipientId = decodeURIComponent(params[0]!);
       const recipient = await app.recipients.get(recipientId);
       if (!recipient) {
@@ -403,7 +578,7 @@ export const routeTable: RouteDefinition[] = [
   {
     pattern: /^\/v1\/envelopes$/,
     allowedMethods: ["GET", "POST"],
-    handler: async ({ method, response, app, authContext, body }) => {
+    handler: async ({ method, response, app, authContext, body, requestId }) => {
       if (method === "GET") {
         const allEnvelopes = await app.envelopes.list();
         const spaceEnvelopes = allEnvelopes.filter(
@@ -412,6 +587,9 @@ export const routeTable: RouteDefinition[] = [
         return sendJson(response, 200, spaceEnvelopes);
       }
       if (method === "POST") {
+        if (rejectViewer(authContext, "create envelopes", requestId, response)) {
+          return;
+        }
         const envelopeData = {
           ...body,
           id: (body.id as string) || `env_${randomBytes(8).toString("hex")}`,
@@ -456,6 +634,9 @@ export const routeTable: RouteDefinition[] = [
         return sendJson(response, 200, spaceIntents);
       }
       if (method === "POST") {
+        if (rejectViewer(authContext, "create intents", requestId, response)) {
+          return;
+        }
         // Cross-tenant reference checks
         if (body.envelopeId && typeof body.envelopeId === "string") {
           const envelope = await app.envelopes.get(body.envelopeId);
@@ -505,6 +686,9 @@ export const routeTable: RouteDefinition[] = [
     pattern: /^\/v1\/payments\/prepare$/,
     allowedMethods: ["POST"],
     handler: async ({ response, app, authContext, body, requestId }) => {
+      if (rejectViewer(authContext, "prepare payments", requestId, response)) {
+        return;
+      }
       const intentId = body.intentId as string;
       if (!intentId) {
         return sendNotFound(response, "intent", requestId);
@@ -580,6 +764,9 @@ export const routeTable: RouteDefinition[] = [
     pattern: /^\/v1\/payments\/submission$/,
     allowedMethods: ["POST"],
     handler: async ({ response, app, authContext, body, requestId }) => {
+      if (rejectViewer(authContext, "submit payments", requestId, response)) {
+        return;
+      }
       const txHash = body.txHash as string | undefined;
       if (!txHash || typeof txHash !== "string" || !/^0x[a-fA-F0-9]{64}$/.test(txHash)) {
         return sendJson(response, 400, {
@@ -769,6 +956,9 @@ export const routeTable: RouteDefinition[] = [
         return sendJson(response, 200, spacePayments);
       }
       if (method === "POST") {
+        if (rejectViewer(authContext, "create payments", requestId, response)) {
+          return;
+        }
         const intentId = body.intentId as string;
         if (!intentId) {
           return sendNotFound(response, "intent", requestId);
@@ -823,6 +1013,9 @@ export const routeTable: RouteDefinition[] = [
     pattern: /^\/v1\/payments\/([^/]+)\/submission$/,
     allowedMethods: ["POST"],
     handler: async ({ response, app, authContext, params, body, requestId }) => {
+      if (rejectViewer(authContext, "submit payments", requestId, response)) {
+        return;
+      }
       const paymentId = params[0]!;
       const payment = await app.payments.get(paymentId);
       if (
@@ -1006,6 +1199,9 @@ export const routeTable: RouteDefinition[] = [
     pattern: /^\/v1\/payments\/([^/]+)\/confirm$/,
     allowedMethods: ["POST"],
     handler: async ({ response, app, authContext, params, requestId }) => {
+      if (rejectViewer(authContext, "confirm payments", requestId, response)) {
+        return;
+      }
       const paymentId = params[0]!;
       const payment = await app.payments.get(paymentId);
       if (!payment || (payment.spaceId && payment.spaceId !== authContext.space.id)) {
@@ -1029,6 +1225,18 @@ export const routeTable: RouteDefinition[] = [
           message: `Cannot confirm payment in status '${payment.status}'; must be 'submitted' or 'confirming'`,
           requestId
         });
+      }
+
+      if (app.confirmer && payment.txHash) {
+        const confirmation = await app.confirmer(payment.txHash);
+        if (!confirmation.confirmed) {
+          return sendJson(response, 409, {
+            error: "unconfirmed_transaction",
+            code: "unconfirmed_transaction",
+            message: "Transaction receipt has not been confirmed onchain",
+            requestId
+          });
+        }
       }
 
       await app.payments.transitionStatus?.(
@@ -1061,6 +1269,9 @@ export const routeTable: RouteDefinition[] = [
     pattern: /^\/v1\/payments\/([^/]+)\/claim$/,
     allowedMethods: ["POST"],
     handler: async ({ response, app, authContext, params, body, requestId }) => {
+      if (rejectViewer(authContext, "claim payments", requestId, response)) {
+        return;
+      }
       const paymentId = params[0]!;
       const payment = await app.payments.get(paymentId);
       if (!payment || (payment.spaceId && payment.spaceId !== authContext.space.id)) {
