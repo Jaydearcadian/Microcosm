@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createServer } from "node:http";
 import { generateKeyPair, SignJWT, exportSPKI } from "jose";
 import { privateKeyToAccount } from "viem/accounts";
 import { NextRequest } from "next/server.js";
@@ -428,6 +429,101 @@ test("Production Routes & Gateway: P0 Security & Adversarial Isolation Suite", a
     const unreachableData = await unreachableRes.json();
     assert.equal(unreachableData.status, "degraded");
     assert.equal(unreachableData.apiUpstream.status, "unreachable");
+
+    // Restore valid proxy
+    process.env.MICROCOSM_API_PROXY = apiOrigin;
+
+    // 12.4 Fail-closed tests for missing upstream fields or failing checks
+    let mockPayload: any = {};
+    const mockUpstream = createServer((_req, res) => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify(mockPayload));
+    });
+    await new Promise<void>((resolve) => mockUpstream.listen(0, resolve));
+    const mockPort = (mockUpstream.address() as any).port;
+    const mockOrigin = `http://127.0.0.1:${mockPort}`;
+    process.env.MICROCOSM_API_PROXY = mockOrigin;
+
+    try {
+      // 12.4.1 Missing expectedChainId fails closed with 503
+      mockPayload = {
+        status: "ok",
+        observedChainId: 5042,
+        checks: [
+          { name: "postgres", status: "ok" },
+          { name: "arc_rpc", status: "ok" },
+          { name: "privy", status: "ok" }
+        ]
+      };
+      const resA = await readinessGet();
+      assert.equal(resA.status, 503);
+      const dataA = await resA.json();
+      assert.equal(dataA.status, "degraded");
+      assert.equal(dataA.apiUpstream.status, "chain_mismatch");
+
+      // 12.4.2 Missing observedChainId fails closed with 503
+      mockPayload = {
+        status: "ok",
+        expectedChainId: 5042,
+        checks: [
+          { name: "postgres", status: "ok" },
+          { name: "arc_rpc", status: "ok" },
+          { name: "privy", status: "ok" }
+        ]
+      };
+      const resB = await readinessGet();
+      assert.equal(resB.status, 503);
+      const dataB = await resB.json();
+      assert.equal(dataB.status, "degraded");
+      assert.equal(dataB.apiUpstream.status, "chain_mismatch");
+
+      // 12.4.3 Missing checks array fails closed with 503
+      mockPayload = {
+        status: "ok",
+        expectedChainId: 5042,
+        observedChainId: 5042
+      };
+      const resC = await readinessGet();
+      assert.equal(resC.status, 503);
+      const dataC = await resC.json();
+      assert.equal(dataC.status, "degraded");
+      assert.equal(dataC.apiUpstream.status, "degraded");
+
+      // 12.4.4 Missing postgres check fails closed with 503
+      mockPayload = {
+        status: "ok",
+        expectedChainId: 5042,
+        observedChainId: 5042,
+        checks: [
+          { name: "arc_rpc", status: "ok" },
+          { name: "privy", status: "ok" }
+        ]
+      };
+      const resD = await readinessGet();
+      assert.equal(resD.status, 503);
+      const dataD = await resD.json();
+      assert.equal(dataD.status, "degraded");
+      assert.equal(dataD.apiUpstream.status, "degraded");
+
+      // 12.4.5 Unhealthy check (postgres error) fails closed with 503
+      mockPayload = {
+        status: "ok",
+        expectedChainId: 5042,
+        observedChainId: 5042,
+        checks: [
+          { name: "postgres", status: "error" },
+          { name: "arc_rpc", status: "ok" },
+          { name: "privy", status: "ok" }
+        ]
+      };
+      const resE = await readinessGet();
+      assert.equal(resE.status, 503);
+      const dataE = await resE.json();
+      assert.equal(dataE.status, "degraded");
+      assert.equal(dataE.apiUpstream.status, "degraded");
+    } finally {
+      await new Promise<void>((resolve) => mockUpstream.close(() => resolve()));
+    }
 
     // Restore valid proxy
     process.env.MICROCOSM_API_PROXY = apiOrigin;

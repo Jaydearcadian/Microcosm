@@ -80,14 +80,28 @@ type UpstreamHealthReport = {
       } else if (!data || typeof data !== "object" || data.status !== "ok") {
         apiProxyStatus = "degraded";
         apiProxyError = "upstream_status_degraded";
-      } else if (typeof data.expectedChainId === "number" && data.expectedChainId !== expectedChainId) {
+      } else if (data.expectedChainId !== expectedChainId) {
         apiProxyStatus = "chain_mismatch";
         apiProxyError = `upstream_expected_chain_mismatch: upstream=${data.expectedChainId}, gateway=${expectedChainId}`;
-      } else if (typeof data.observedChainId === "number" && data.observedChainId !== expectedChainId) {
+      } else if (data.observedChainId !== expectedChainId) {
         apiProxyStatus = "chain_mismatch";
         apiProxyError = `upstream_observed_chain_mismatch: upstream=${data.observedChainId}, gateway=${expectedChainId}`;
+      } else if (!Array.isArray(data.checks)) {
+        apiProxyStatus = "degraded";
+        apiProxyError = "upstream_missing_checks";
       } else {
-        apiProxyStatus = "ok";
+        const requiredChecks = ["postgres", "arc_rpc", "privy"];
+        const missingOrFailingCheck = requiredChecks.find((checkName) => {
+          const check = data.checks?.find((c) => c && c.name === checkName);
+          return !check || check.status !== "ok";
+        });
+
+        if (missingOrFailingCheck) {
+          apiProxyStatus = "degraded";
+          apiProxyError = `upstream_check_failed: ${missingOrFailingCheck}`;
+        } else {
+          apiProxyStatus = "ok";
+        }
       }
     } catch (err) {
       apiProxyStatus = "unreachable";
