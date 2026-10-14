@@ -69,3 +69,5 @@ npm-debug.log*
 # Local archives and exports
 checkpoints/
 output/
+.vercel
+.env*
