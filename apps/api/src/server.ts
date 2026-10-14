@@ -75,21 +75,39 @@ export const createApiServer = (
       }
 
       if (request.method === "GET" && url.pathname === "/healthz") {
-        const config = getApiRuntimeConfig();
-        const report = await getRuntimeHealth({
-          databaseUrl: config.databaseUrl,
-          arcRpcUrl: config.arcRpcUrl
-        });
-        return sendJson(response, report.status === "ok" ? 200 : 503, report);
+        try {
+          const config = getApiRuntimeConfig();
+          const report = await getRuntimeHealth({
+            databaseUrl: options.databaseUrl ?? config.databaseUrl,
+            arcRpcUrl: config.arcRpcUrl,
+            expectedChainId: config.arcChainId
+          });
+          return sendJson(response, report.status === "ok" ? 200 : 503, report);
+        } catch (error) {
+          return sendJson(response, 503, {
+            status: "degraded",
+            service: apiAppName,
+            error: error instanceof Error ? error.message : "health_check_failed"
+          });
+        }
       }
 
       if (request.method === "GET" && url.pathname === "/readyz") {
-        const config = getApiRuntimeConfig();
-        const report = await getRuntimeHealth({
-          databaseUrl: config.databaseUrl,
-          arcRpcUrl: config.arcRpcUrl
-        });
-        return sendJson(response, report.status === "ok" ? 200 : 503, report);
+        try {
+          const config = getApiRuntimeConfig();
+          const report = await getRuntimeHealth({
+            databaseUrl: options.databaseUrl ?? config.databaseUrl,
+            arcRpcUrl: config.arcRpcUrl,
+            expectedChainId: config.arcChainId
+          });
+          return sendJson(response, report.status === "ok" ? 200 : 503, report);
+        } catch (error) {
+          return sendJson(response, 503, {
+            status: "degraded",
+            service: apiAppName,
+            error: error instanceof Error ? error.message : "ready_check_failed"
+          });
+        }
       }
 
       // Delegate all /v1 endpoints to the centralized versioned dispatcher

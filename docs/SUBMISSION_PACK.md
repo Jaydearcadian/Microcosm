@@ -12,7 +12,7 @@
 
 | Resource | Verified Target | Status |
 | :--- | :--- | :--- |
-| **Public GitHub Repository** | [`https://github.com/Jaydearcadian/Microcosm`](https://github.com/Jaydearcadian/Microcosm) | **VERIFIED REMOTE** (Commit `e64adef` public) |
+| **Public GitHub Repository** | [`https://github.com/Jaydearcadian/Microcosm`](https://github.com/Jaydearcadian/Microcosm) | **VERIFIED REMOTE** (Commit `79596f8` public) |
 | **Production Consumer Web UI** | [`https://charcoal-brown.vercel.app`](https://charcoal-brown.vercel.app) | **VERIFIED REMOTE** (HTTP 200, Next.js serverless API & UI) |
 | **Arc Mainnet RPC** | `https://rpc.mainnet.arc.io/` (Chain ID `5042`) | **VERIFIED REMOTE** (`eth_chainId` returns `0x13b2`) |
 | **Arc Testnet RPC** | `https://rpc.testnet.arc.network` (Chain ID `5042002`) | **VERIFIED REMOTE** (`eth_chainId` returns `0x4cf102`) |
@@ -144,7 +144,7 @@ Exit code: 0 (0 errors)
 
 # Run full automated test suite
 $ npm test
-Exit code: 0 (133/133 tests passing)
+Exit code: 0 (134/134 tests passing)
 
 # Build consumer web application and API handlers
 $ npm run build --workspace=@mcosm/web

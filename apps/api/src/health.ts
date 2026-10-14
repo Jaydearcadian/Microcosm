@@ -6,10 +6,15 @@ export type ServiceCheck = {
   name: string;
   status: HealthStatus;
   detail?: string;
+  expectedChainId?: number;
+  observedChainId?: number;
 };
 
 export type RuntimeHealthReport = {
   status: "ok" | "degraded";
+  service: string;
+  expectedChainId?: number;
+  observedChainId?: number;
   checks: ServiceCheck[];
 };
 
@@ -50,7 +55,8 @@ export const checkArcRpc = async (
       return {
         name: "arc_rpc",
         status: "error",
-        detail: `http_${response.status}`
+        detail: `http_${response.status}`,
+        expectedChainId
       };
     }
 
@@ -60,7 +66,8 @@ export const checkArcRpc = async (
       return {
         name: "arc_rpc",
         status: "error",
-        detail: "missing_chain_id"
+        detail: "missing_chain_id",
+        expectedChainId
       };
     }
 
@@ -69,20 +76,25 @@ export const checkArcRpc = async (
       return {
         name: "arc_rpc",
         status: "error",
-        detail: `chain_id_mismatch: remote=${numericChainId}, expected=${expectedChainId}`
+        detail: `chain_id_mismatch: remote=${numericChainId}, expected=${expectedChainId}`,
+        expectedChainId,
+        observedChainId: numericChainId
       };
     }
 
     return {
       name: "arc_rpc",
       status: "ok",
-      detail: payload.result
+      detail: payload.result,
+      expectedChainId,
+      observedChainId: numericChainId
     };
   } catch (error) {
     return {
       name: "arc_rpc",
       status: "error",
-      detail: error instanceof Error ? error.message : "unknown_error"
+      detail: error instanceof Error ? error.message : "unknown_error",
+      expectedChainId
     };
   }
 };
@@ -115,8 +127,13 @@ export const getRuntimeHealth = async ({
     Promise.resolve(checkPrivyConfig(env))
   ]);
 
+  const arcCheck = checks.find((c) => c.name === "arc_rpc");
+
   return {
     status: checks.every((check) => check.status === "ok") ? "ok" : "degraded",
+    service: "microcosm-api",
+    expectedChainId,
+    observedChainId: arcCheck?.observedChainId,
     checks
   };
 };

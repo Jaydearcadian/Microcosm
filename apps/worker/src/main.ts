@@ -58,7 +58,8 @@ const main = async () => {
   const config = getApiRuntimeConfig();
   const health = await getRuntimeHealth({
     databaseUrl: config.databaseUrl,
-    arcRpcUrl: config.arcRpcUrl
+    arcRpcUrl: config.arcRpcUrl,
+    expectedChainId: config.arcChainId
   });
 
   if (health.status !== "ok") {

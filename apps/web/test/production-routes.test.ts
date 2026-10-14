@@ -29,8 +29,18 @@ test("Production Routes & Gateway: P0 Security & Adversarial Isolation Suite", a
   });
 
   await server.start();
+  const apiOrigin = server.url;
   const originalProxy = process.env.MICROCOSM_API_PROXY;
-  process.env.MICROCOSM_API_PROXY = server.url;
+  const originalDb = process.env.DATABASE_URL;
+  const originalPrivyId = process.env.PRIVY_APP_ID;
+  const originalPrivySec = process.env.PRIVY_APP_SECRET;
+  const originalNetwork = process.env.ARC_NETWORK;
+
+  process.env.MICROCOSM_API_PROXY = apiOrigin;
+  process.env.DATABASE_URL = "postgres://microcosm:microcosm@127.0.0.1:5432/microcosm_test";
+  process.env.PRIVY_APP_ID = appId;
+  process.env.PRIVY_APP_SECRET = "test_privy_secret_value_123456789";
+  process.env.ARC_NETWORK = "mainnet";
 
   const makeToken = async (opts: {
     sub: string;
@@ -404,6 +414,23 @@ test("Production Routes & Gateway: P0 Security & Adversarial Isolation Suite", a
     assert.equal(readinessData.arcRpc.status, "ok");
     assert.equal(readinessData.arcRpc.expectedChainId, 5042);
     assert.equal(readinessData.apiUpstream.status, "ok");
+    assert.equal(readinessData.apiUpstream.expectedChainId, 5042);
+    assert.equal(readinessData.apiUpstream.observedChainId, 5042);
+    assert.ok(Array.isArray(readinessData.apiUpstream.checks));
+    assert.ok(readinessData.apiUpstream.checks.some((c: any) => c.name === "postgres" && c.status === "ok"));
+    assert.ok(readinessData.apiUpstream.checks.some((c: any) => c.name === "arc_rpc" && c.status === "ok"));
+    assert.ok(readinessData.apiUpstream.checks.some((c: any) => c.name === "privy" && c.status === "ok"));
+
+    // 12.3 When upstream is unreachable or returns 503, gateway readiness fails closed with 503
+    process.env.MICROCOSM_API_PROXY = "http://127.0.0.1:19999"; // Non-existent port
+    const unreachableRes = await readinessGet();
+    assert.equal(unreachableRes.status, 503);
+    const unreachableData = await unreachableRes.json();
+    assert.equal(unreachableData.status, "degraded");
+    assert.equal(unreachableData.apiUpstream.status, "unreachable");
+
+    // Restore valid proxy
+    process.env.MICROCOSM_API_PROXY = apiOrigin;
 
 
   } finally {
@@ -411,6 +438,26 @@ test("Production Routes & Gateway: P0 Security & Adversarial Isolation Suite", a
       process.env.MICROCOSM_API_PROXY = originalProxy;
     } else {
       delete process.env.MICROCOSM_API_PROXY;
+    }
+    if (originalDb !== undefined) {
+      process.env.DATABASE_URL = originalDb;
+    } else {
+      delete process.env.DATABASE_URL;
+    }
+    if (originalPrivyId !== undefined) {
+      process.env.PRIVY_APP_ID = originalPrivyId;
+    } else {
+      delete process.env.PRIVY_APP_ID;
+    }
+    if (originalPrivySec !== undefined) {
+      process.env.PRIVY_APP_SECRET = originalPrivySec;
+    } else {
+      delete process.env.PRIVY_APP_SECRET;
+    }
+    if (originalNetwork !== undefined) {
+      process.env.ARC_NETWORK = originalNetwork;
+    } else {
+      delete process.env.ARC_NETWORK;
     }
     await server.stop();
   }

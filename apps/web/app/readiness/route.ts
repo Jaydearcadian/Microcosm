@@ -49,24 +49,45 @@ export async function GET() {
     rpcError = err instanceof Error ? err.message : "rpc_fetch_failed";
   }
 
-  // 2. Check Secured API upstream connectivity via MICROCOSM_API_PROXY
+type UpstreamHealthReport = {
+  status?: string;
+  service?: string;
+  expectedChainId?: number;
+  observedChainId?: number;
+  checks?: Array<{ name: string; status: string; detail?: string; expectedChainId?: number; observedChainId?: number }>;
+};
+
+  // 2. Check Secured API upstream connectivity via MICROCOSM_API_PROXY (/readyz)
   const proxyUrl = process.env.MICROCOSM_API_PROXY;
   let apiProxyStatus = "not_configured";
   let apiProxyOrigin: string | null = null;
   let apiProxyError: string | null = null;
+  let upstreamReport: UpstreamHealthReport | null = null;
 
   if (proxyUrl && proxyUrl.trim().length > 0) {
     try {
       const u = new URL(proxyUrl);
       apiProxyOrigin = u.origin;
-      const res = await fetch(`${u.origin}/health`, {
+      const res = await fetch(`${u.origin}/readyz`, {
         signal: AbortSignal.timeout(5000)
       });
-      if (res.ok) {
-        apiProxyStatus = "ok";
+      const data = (await res.json().catch(() => null)) as UpstreamHealthReport | null;
+      upstreamReport = data;
+
+      if (!res.ok) {
+        apiProxyStatus = "degraded";
+        apiProxyError = `upstream_http_${res.status}`;
+      } else if (!data || typeof data !== "object" || data.status !== "ok") {
+        apiProxyStatus = "degraded";
+        apiProxyError = "upstream_status_degraded";
+      } else if (typeof data.expectedChainId === "number" && data.expectedChainId !== expectedChainId) {
+        apiProxyStatus = "chain_mismatch";
+        apiProxyError = `upstream_expected_chain_mismatch: upstream=${data.expectedChainId}, gateway=${expectedChainId}`;
+      } else if (typeof data.observedChainId === "number" && data.observedChainId !== expectedChainId) {
+        apiProxyStatus = "chain_mismatch";
+        apiProxyError = `upstream_observed_chain_mismatch: upstream=${data.observedChainId}, gateway=${expectedChainId}`;
       } else {
-        apiProxyStatus = "error";
-        apiProxyError = `HTTP_${res.status}`;
+        apiProxyStatus = "ok";
       }
     } catch (err) {
       apiProxyStatus = "unreachable";
@@ -94,6 +115,9 @@ export async function GET() {
         configured: Boolean(proxyUrl && proxyUrl.trim().length > 0),
         origin: apiProxyOrigin,
         status: apiProxyStatus,
+        expectedChainId: upstreamReport?.expectedChainId,
+        observedChainId: upstreamReport?.observedChainId,
+        checks: upstreamReport?.checks ?? null,
         error: apiProxyError
       },
       timestamp: new Date().toISOString()
