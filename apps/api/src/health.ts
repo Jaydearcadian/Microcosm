@@ -76,7 +76,7 @@ export const checkArcRpc = async (rpcUrl: string): Promise<ServiceCheck> => {
 };
 
 export const checkPrivyConfig = (
-  env: NodeJS.ProcessEnv = process.env
+  env: NodeJS.ProcessEnv | Record<string, string | undefined> = process.env
 ): ServiceCheck => ({
   name: "privy",
   status: env.PRIVY_APP_ID && env.PRIVY_APP_SECRET ? "ok" : "error",
@@ -93,7 +93,7 @@ export const getRuntimeHealth = async ({
 }: {
   databaseUrl: string;
   arcRpcUrl: string;
-  env?: NodeJS.ProcessEnv;
+  env?: NodeJS.ProcessEnv | Record<string, string | undefined>;
 }): Promise<RuntimeHealthReport> => {
   const checks = await Promise.all([
     checkPostgres(databaseUrl),

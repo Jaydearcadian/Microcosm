@@ -212,7 +212,7 @@ test("getRuntimeHealth reports degraded status when checks fail", async () => {
       env: {
         PRIVY_APP_ID: "privy-app-id",
         PRIVY_APP_SECRET: "privy-app-secret"
-      } as NodeJS.ProcessEnv
+      }
     });
 
     assert.equal(health.status, "degraded");

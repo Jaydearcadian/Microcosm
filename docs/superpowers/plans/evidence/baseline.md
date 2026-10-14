@@ -38,3 +38,37 @@ Clean install re-tested:
   - `PRIVY_APP_SECRET` (Privy server authentication secret)
   - `ARC_SETTLEMENT_PRIVATE_KEY` / `PRIVATE_KEY` (Arc wallet private key)
   - `ARC_MAINNET_RPC_URL` / `ARC_TESTNET_RPC_URL` (Arc RPC endpoint)
+
+## 4. Post-Contract & Web Scaffold Verification (Plan 1 Task 2 & Plan 2 Task 1)
+
+**Date:** 2026-10-14  
+Following the implementation of versioned API contracts (`packages/api-contracts`), identity principal resolution & cryptographic signature verification (`packages/identity`), personal space domains (`packages/spaces`), and the consumer web application scaffold (`apps/web` / `@mcosm/web`):
+
+### 1. `npm ci`
+- **Status:** **PASS**
+- **Evidence:** Added 1959 packages, audited 1989 packages in 2m. Monorepo workspaces (`@mcosm/web`, `@mcosm/api-contracts`, `@mcosm/identity`, `@mcosm/spaces`, etc.) linked cleanly.
+
+### 2. `npm test`
+- **Status:** **PASS** (90 passing, 0 failing)
+- **Evidence:** Complete test suite runs in ~5.7s via `node --experimental-strip-types --test apps/**/*.test.ts packages/*/test/**/*.test.ts packages/adapters/*/test/**/*.test.ts`.
+- **Coverage Highlights:**
+  - `packages/api-contracts`: 12 test assertions validating schemas for `MeResponse`, `SpaceResponse`, `BalanceResponse`, `CreateIntentRequest`, `PreparePaymentResponse`, `RecordSubmissionRequest`, `PaymentResponse`, `ActivityResponse`, and standard error envelopes.
+  - `packages/identity`: 5 new assertions validating canonical principal creation, provider subject deduplication, email update idempotency, conflicting link rejection, and EIP-191 / viem signature verification.
+  - `packages/spaces`: 4 new assertions validating idempotent personal space creation, concurrency safety, active membership checks, and owner isolation.
+  - `apps/web`: Smoke test verifying Next.js routes and layout structure.
+
+### 3. `npm run typecheck`
+- **Status:** **PASS** (0 errors)
+- **Evidence:** `node ./node_modules/typescript/bin/tsc --noEmit -p tsconfig.json` completes cleanly across root, backend apps, domain packages, and Next.js web application.
+
+### 4. `npm run build --workspace=@mcosm/web`
+- **Status:** **PASS**
+- **Evidence:** Next.js production build succeeded with Turbopack/Webpack. Static pages generated:
+  - `/` (245 kB First Load JS)
+  - `/_not-found` (106 kB First Load JS)
+
+### 5. Untested / External Verification Status (Distinction from passing local checks)
+- **Live PostgreSQL database migrations & connections (`checkPostgres`):** **NOT RUN** (tested via in-memory repository mocks and query unit tests; live database connection requires runtime instance in Plan 1 Task 7).
+- **Live Arc mainnet / testnet JSON-RPC transactions (`checkArcRpc`):** **NOT RUN** (RPC calls and transaction receipts tested via mock fetch and synthetic JSON-RPC responses; live chain submission gated for Plan 3).
+- **Live Privy authentication tokens:** **NOT RUN** (Privy auth provider uses valid 25-char dev placeholder `clmockprivyapp00000000000` to allow static prerendering; live Privy token validation requires live credentials).
+

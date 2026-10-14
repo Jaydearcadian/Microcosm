@@ -20,7 +20,7 @@ const requireEnv = (name: string, value: string | undefined): string => {
 };
 
 export const getApiRuntimeConfig = (
-  env: NodeJS.ProcessEnv = process.env
+  env: NodeJS.ProcessEnv | Record<string, string | undefined> = process.env
 ): ApiRuntimeConfig => ({
   databaseUrl: requireEnv("DATABASE_URL", env.DATABASE_URL),
   privyAppId: requireEnv("PRIVY_APP_ID", env.PRIVY_APP_ID),
