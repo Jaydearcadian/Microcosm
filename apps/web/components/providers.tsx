@@ -2,6 +2,7 @@
 
 import React from "react";
 import { PrivyProvider } from "@privy-io/react-auth";
+import { MicrocosmSessionProvider } from "../features/identity/IdentityProvider.tsx";
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const envAppId = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
@@ -21,7 +22,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
         }
       }}
     >
-      {children}
+      <MicrocosmSessionProvider>{children}</MicrocosmSessionProvider>
     </PrivyProvider>
   );
 }
