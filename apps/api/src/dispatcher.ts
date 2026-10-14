@@ -339,6 +339,7 @@ export const routeTable: RouteDefinition[] = [
 
         const recipientService = app.recipients as {
           create?: (input: {
+            id?: string;
             spaceId: string;
             ownerUserId: string;
             recipientType: "wallet" | "email" | "handle" | "agent";
