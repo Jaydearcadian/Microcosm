@@ -12,7 +12,7 @@
 
 | Resource | Verified Target | Status |
 | :--- | :--- | :--- |
-| **Public GitHub Repository** | [`https://github.com/Jaydearcadian/Microcosm`](https://github.com/Jaydearcadian/Microcosm) | **VERIFIED REMOTE** (Commit `79596f8` public) |
+| **Public GitHub Repository** | [`https://github.com/Jaydearcadian/Microcosm`](https://github.com/Jaydearcadian/Microcosm) | **VERIFIED REMOTE** (Commit `6d32fac` public) |
 | **Production Consumer Web UI** | [`https://charcoal-brown.vercel.app`](https://charcoal-brown.vercel.app) | **VERIFIED REMOTE** (HTTP 200, Next.js serverless API & UI) |
 | **Arc Mainnet RPC** | `https://rpc.mainnet.arc.io/` (Chain ID `5042`) | **VERIFIED REMOTE** (`eth_chainId` returns `0x13b2`) |
 | **Arc Testnet RPC** | `https://rpc.testnet.arc.network` (Chain ID `5042002`) | **VERIFIED REMOTE** (`eth_chainId` returns `0x4cf102`) |
@@ -25,10 +25,10 @@
 
 | Gate | Focus Area | Status | Evidence & Verification Commands |
 | :---: | :--- | :---: | :--- |
-| **G0** | **Baseline & Code Quality** | **LOCAL_PASS** | Clean monorepo dependencies, zero-error typechecking (`npm run typecheck`), 134/134 tests passing (`npm test`), PostgreSQL concurrency & persistence tests verified. |
+| **G0** | **Baseline & Code Quality** | **LOCAL_PASS** | Clean monorepo dependencies, zero-error typechecking (`npm run typecheck`), 134/134 monorepo tests and 14/14 web gateway tests passing (`npm test`, `npm test --workspace=@mcosm/web`), PostgreSQL concurrency & persistence tests verified. |
 | **G1** | **Identity & Space Isolation** | **LOCAL_PASS** | Centralized `/v1` dispatcher, canonical principal resolution decoupled from email/wallet, multi-tenant Space isolation, viewer role read-only enforcement, single-use EIP-191 cryptographic wallet challenge-response linking. Remediated through independent security code review. |
-| **G2** | **Consumer Web UI & Gateway** | **LIVE_READ_PASS (UI) / PROXY FAIL-CLOSED (API)** | Mobile-first and desktop-responsive web application in `apps/web`. Dark-mode financial tokens, pure `BigInt` exact base-unit math (zero float loss), Privy social login & wallet integration, `/money` (send flow), `/receive` (QR deposit address), `/people` (isolated contacts), `/activity` (verifiable receipt feed), `/settings`. Next.js gateway routes (`/health`, `/readiness`, `/v1/*`) proxy to secured backend via `MICROCOSM_API_PROXY`, strictly failing closed with 503 if unconfigured or unreachable. Mock in-memory Maps and synthetic tokens removed. |
-| **G3** | **Live Arc Settlement Verification** | **LIVE_WRITE_PASS (Testnet) / PENDING USER WALLET SIGNING (Mainnet)** | Live transfer executed on Arc Testnet (chain `5042002`). Transfer of exact base units verified via `verifyUsdcTransfer` checking ERC-20 `Transfer` topic (`0xddf25...`), verified contract `0x3600...0000`, sender, recipient, and base units. Mined in block `67174208`. Tx: [`0xb9ff68b7...21be408`](https://testnet.arcscan.app/tx/0xb9ff68b720ccc128a8791435979dd08b50ea16d189df212a0e4a256b321be408). Mainnet RPC and USDC contract verified onchain; mainnet transfer awaits user wallet signing approval. |
+| **G2** | **Consumer Web UI & Gateway** | **LIVE_READ_PASS (UI) / PROXY FAIL-CLOSED (API)** | Mobile-first and desktop-responsive web application in `apps/web`. Dark-mode financial tokens, pure `BigInt` exact base-unit math (zero float loss), Privy social login & wallet integration, `/money` (send flow), `/receive` (QR deposit address), `/people` (isolated contacts), `/activity` (verifiable receipt feed), `/settings`. Next.js gateway routes (`/health`, `/readiness`, `/v1/*`) proxy to secured backend via `MICROCOSM_API_PROXY`, strictly failing closed with 503 if unconfigured, unreachable, missing expected/observed chain IDs, or reporting any degraded dependency (`postgres`, `arc_rpc`, `privy`). |
+| **G3** | **Live Arc Settlement Verification** | **LIVE_WRITE_PASS (Testnet) / PENDING USER WALLET SIGNING (Mainnet)** | Live transfer executed on Arc Testnet (chain `5042002`). Transfer of exact base units verified via `verifyUsdcTransfer` checking ERC-20 `Transfer` topic (`0xddf25...`), verified contract `0x3600...0000`, sender, recipient, and base units. Mined in block `67174208`. Tx: [`0xb9ff68b7...21be408`](https://testnet.arcscan.app/tx/0xb9ff68b720ccc128a8791435979dd08b50ea16d189df212a0e4a256b321be408). Mainnet RPC (`https://rpc.mainnet.arc.io/`, chain `5042`) and official USDC contract (`0x3600...0000`) verified onchain and healthy; consumer transfer route is strictly non-custodial and never holds or uses a server-side signing key, pending interactive user wallet signing approval. |
 | **G4** | **Deployment & Release Evidence** | **VERIFIED_REMOTE** | Public HTTPS consumer app and serverless API live on Vercel at `https://charcoal-brown.vercel.app`, GitHub repository public at `https://github.com/Jaydearcadian/Microcosm`. Sensitive environment files excluded from deployment bundle via `.vercelignore`. |
 | **G5** | **Submission Pack & DoraHacks Handoff** | **DRAFT READY** | Formatted submission pack complete with project pitch, primitives breakdown, architecture diagrams, and copy-paste application form. Outstanding action: final interactive submission on DoraHacks. |
 
@@ -142,9 +142,11 @@ Arc Official USDC: `0x3600000000000000000000000000000000000000`
 $ npm run typecheck
 Exit code: 0 (0 errors)
 
-# Run full automated test suite
+# Run full automated test suite (monorepo packages & web gateway)
 $ npm test
-Exit code: 0 (134/134 tests passing)
+Exit code: 0 (134/134 monorepo tests passing)
+$ npm test --workspace=@mcosm/web
+Exit code: 0 (14/14 web gateway & security tests passing)
 
 # Build consumer web application and API handlers
 $ npm run build --workspace=@mcosm/web
