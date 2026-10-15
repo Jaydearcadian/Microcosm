@@ -244,7 +244,12 @@ export const PreparePaymentResponseSchema = z
     chainId: ChainIdSchema,
     tokenAddress: EvmAddressSchema,
     amountBaseUnits: MoneyBaseUnitsStringSchema,
-    expiresAt: z.string()
+    expiresAt: z.string(),
+    // "direct": calldata is an ERC-20 transfer on the USDC contract.
+    // "envelope": calldata is executePayment on the intent's ProgrammableEnvelope,
+    // so policy (caps/schedule/allowlist) is enforced onchain before transfer.
+    execution: z.enum(["direct", "envelope"]).optional(),
+    envelopeAddress: EvmAddressSchema.optional()
   })
   .strict();
 

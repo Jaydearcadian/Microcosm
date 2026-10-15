@@ -48,8 +48,9 @@ export const claimEscrowAbi = [
     inputs: [
       { name: "paymentIdHash", type: "bytes32" },
       { name: "token", type: "address" },
+      { name: "recipient", type: "address" },
       { name: "amount", type: "uint256" },
-      { name: "lookupKey", type: "string" }
+      { name: "expiresAt", type: "uint64" }
     ],
     outputs: []
   },
@@ -57,10 +58,14 @@ export const claimEscrowAbi = [
     type: "function",
     name: "claim",
     stateMutability: "nonpayable",
-    inputs: [
-      { name: "paymentIdHash", type: "bytes32" },
-      { name: "recipient", type: "address" }
-    ],
+    inputs: [{ name: "paymentIdHash", type: "bytes32" }],
+    outputs: []
+  },
+  {
+    type: "function",
+    name: "refund",
+    stateMutability: "nonpayable",
+    inputs: [{ name: "paymentIdHash", type: "bytes32" }],
     outputs: []
   },
   {
@@ -70,8 +75,9 @@ export const claimEscrowAbi = [
       { indexed: true, name: "paymentIdHash", type: "bytes32" },
       { indexed: true, name: "token", type: "address" },
       { indexed: true, name: "depositor", type: "address" },
+      { indexed: false, name: "recipient", type: "address" },
       { indexed: false, name: "amount", type: "uint256" },
-      { indexed: false, name: "lookupKey", type: "string" }
+      { indexed: false, name: "expiresAt", type: "uint64" }
     ]
   },
   {
@@ -82,12 +88,94 @@ export const claimEscrowAbi = [
       { indexed: true, name: "recipient", type: "address" },
       { indexed: false, name: "amount", type: "uint256" }
     ]
+  },
+  {
+    type: "event",
+    name: "EscrowRefunded",
+    inputs: [
+      { indexed: true, name: "paymentIdHash", type: "bytes32" },
+      { indexed: true, name: "depositor", type: "address" },
+      { indexed: false, name: "amount", type: "uint256" }
+    ]
+  }
+] as const;
+
+export const envelopeAbi = [
+  {
+    type: "function",
+    name: "executePayment",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "paymentId", type: "bytes32" },
+      { name: "recipient", type: "address" },
+      { name: "amount", type: "uint256" }
+    ],
+    outputs: []
+  }
+] as const;
+
+/**
+ * `executePayment(bytes32,address,uint256)` selector, computed with
+ * ethers.utils.id("executePayment(bytes32,address,uint256)") — verified
+ * against viem's encodeFunctionData in the adapter test suite.
+ */
+export const ENVELOPE_EXECUTE_SELECTOR = "0xa97274c2";
+
+const pad32 = (hex: string) => hex.toLowerCase().replace(/^0x/, "").padStart(64, "0");
+
+/**
+ * Build envelope-mode calldata without a runtime ABI encoder dependency.
+ * The API's /v1/payments/prepare and any client-side path MUST share this
+ * encoding so the paymentId replay guard matches between preparation and
+ * execution (the contract treats paymentId as an opaque bytes32 key).
+ */
+export const encodeEnvelopeExecutePayment = (input: {
+  paymentIdHash: string;
+  recipient: string;
+  amountBaseUnits: bigint | string;
+}) =>
+  `${ENVELOPE_EXECUTE_SELECTOR}${pad32(input.paymentIdHash)}${pad32(
+    input.recipient
+  )}${pad32(BigInt(input.amountBaseUnits).toString(16))}`;
+
+/** keccak256("EnvelopeCreated(address,address,address,uint256)") */
+export const ENVELOPE_CREATED_TOPIC =
+  "0x190903af5d1895480c8bf1a0a1d1d3733e59b9f42bc1d33676c13096db7945aa";
+
+export const envelopeFactoryAbi = [
+  {
+    type: "function",
+    name: "createEnvelope",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "maxPerTransaction", type: "uint256" },
+      { name: "maxPerDay", type: "uint256" },
+      { name: "automaticApprovalLimit", type: "uint256" },
+      { name: "allowedDaysMask", type: "uint8" },
+      { name: "startHourUtc", type: "uint8" },
+      { name: "endHourUtc", type: "uint8" },
+      { name: "recipientAllowlistEnabled", type: "bool" },
+      { name: "initialRecipients", type: "address[]" },
+      { name: "initialOperators", type: "address[]" }
+    ],
+    outputs: [{ name: "envelopeAddress", type: "address" }]
+  },
+  {
+    type: "event",
+    name: "EnvelopeCreated",
+    inputs: [
+      { indexed: true, name: "envelope", type: "address" },
+      { indexed: true, name: "owner", type: "address" },
+      { indexed: true, name: "token", type: "address" },
+      { indexed: false, name: "index", type: "uint256" }
+    ]
   }
 ] as const;
 
 type ArcContractsConfig = {
   settlementRouter?: string;
   claimEscrow?: string;
+  envelopeFactory?: string;
 };
 
 type WalletClientLike = {
@@ -111,12 +199,30 @@ export type ArcContractClient = {
   createClaimEscrow: (input: {
     paymentId: string;
     amount: string;
-    lookupKey: string;
+    recipient: string;
+    expiresAt: bigint | number;
     tokenAddress?: string;
   }) => Promise<string>;
-  claimEscrow: (input: {
+  claimEscrow: (input: { paymentId: string }) => Promise<string>;
+  refundEscrow: (input: { paymentId: string }) => Promise<string>;
+  executeEnvelopePayment: (input: {
     paymentId: string;
+    amount: string;
     recipient: string;
+    envelopeAddress: string;
+  }) => Promise<string>;
+  createEnvelope: (input: {
+    /** USDC decimal strings, parsed to 6-decimal base units internally */
+    maxPerTransaction: string;
+    maxPerDay: string;
+    automaticApprovalLimit: string;
+    allowedDaysMask: number;
+    startHourUtc: number;
+    endHourUtc: number;
+    recipientAllowlistEnabled: boolean;
+    initialRecipients?: string[];
+    initialOperators?: string[];
+    factoryAddress?: string;
   }) => Promise<string>;
   confirmTransaction: (
     txHash: string
@@ -133,7 +239,7 @@ export const arcAdapter = {
   asset: "USDC"
 } as const;
 
-const paymentIdHash = (paymentId: string) =>
+export const paymentIdHash = (paymentId: string) =>
   `0x${Buffer.from(paymentId, "utf8")
     .toString("hex")
     .padEnd(64, "0")
@@ -236,23 +342,81 @@ export const createArcContractClient = ({
     async createClaimEscrow({
       paymentId,
       amount,
-      lookupKey,
+      recipient,
+      expiresAt,
       tokenAddress = ARC_USDC_ADDRESS
     }) {
       const txHash = await (await ensureWalletClient()).writeContract({
         address: requireContract(contracts.claimEscrow, "claimEscrow"),
         abi: claimEscrowAbi,
         functionName: "createEscrow",
-        args: [paymentIdHash(paymentId), tokenAddress, parseUsdcUnits(amount), lookupKey]
+        args: [
+          paymentIdHash(paymentId),
+          tokenAddress,
+          recipient,
+          parseUsdcUnits(amount),
+          typeof expiresAt === "bigint" ? expiresAt : BigInt(expiresAt)
+        ]
       });
       return String(txHash);
     },
-    async claimEscrow({ paymentId, recipient }) {
+    async claimEscrow({ paymentId }) {
       const txHash = await (await ensureWalletClient()).writeContract({
         address: requireContract(contracts.claimEscrow, "claimEscrow"),
         abi: claimEscrowAbi,
         functionName: "claim",
-        args: [paymentIdHash(paymentId), recipient]
+        args: [paymentIdHash(paymentId)]
+      });
+      return String(txHash);
+    },
+    async refundEscrow({ paymentId }) {
+      const txHash = await (await ensureWalletClient()).writeContract({
+        address: requireContract(contracts.claimEscrow, "claimEscrow"),
+        abi: claimEscrowAbi,
+        functionName: "refund",
+        args: [paymentIdHash(paymentId)]
+      });
+      return String(txHash);
+    },
+    async executeEnvelopePayment({ paymentId, amount, recipient, envelopeAddress }) {
+      const txHash = await (await ensureWalletClient()).writeContract({
+        address: envelopeAddress as `0x${string}`,
+        abi: envelopeAbi,
+        functionName: "executePayment",
+        args: [paymentIdHash(paymentId), recipient, parseUsdcUnits(amount)]
+      });
+      return String(txHash);
+    },
+    async createEnvelope({
+      maxPerTransaction,
+      maxPerDay,
+      automaticApprovalLimit,
+      allowedDaysMask,
+      startHourUtc,
+      endHourUtc,
+      recipientAllowlistEnabled,
+      initialRecipients = [],
+      initialOperators = [],
+      factoryAddress
+    }) {
+      const txHash = await (await ensureWalletClient()).writeContract({
+        address: requireContract(
+          factoryAddress ?? contracts.envelopeFactory,
+          "envelopeFactory"
+        ),
+        abi: envelopeFactoryAbi,
+        functionName: "createEnvelope",
+        args: [
+          parseUsdcUnits(maxPerTransaction),
+          parseUsdcUnits(maxPerDay),
+          parseUsdcUnits(automaticApprovalLimit),
+          allowedDaysMask,
+          startHourUtc,
+          endHourUtc,
+          recipientAllowlistEnabled,
+          initialRecipients,
+          initialOperators
+        ]
       });
       return String(txHash);
     },

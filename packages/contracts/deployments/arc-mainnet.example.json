@@ -1,0 +1,10 @@
+{
+  "network": "arc-mainnet",
+  "chainId": 5042,
+  "token": "0x3600000000000000000000000000000000000000",
+  "settlementRouter": "0x0000000000000000000000000000000000000000",
+  "claimEscrow": "0x0000000000000000000000000000000000000000",
+  "envelopeFactory": "0x0000000000000000000000000000000000000000",
+  "deployedAt": null,
+  "status": "example-only; zero addresses mean not deployed"
+}

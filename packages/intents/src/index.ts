@@ -15,6 +15,10 @@ export type CreateIntentInput = {
   recipientAddress?: string;
   tokenAddress?: string;
   chainId?: number;
+  /** Deployed ProgrammableEnvelope address for this Space. When present,
+   *  /v1/payments/prepare returns executePayment calldata targeting the
+   *  envelope instead of a raw USDC transfer (intent-bound execution). */
+  envelopeAddress?: string;
   amountDecimal?: string;
   amountBaseUnits?: string;
   purposeMetadata?: Record<string, unknown>;

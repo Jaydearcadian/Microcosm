@@ -25,6 +25,13 @@ export function PaymentReview({ data, onBack, onSubmitted }: PaymentReviewProps)
   const [submitting, setSubmitting] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Populated after /v1/payments/prepare: shows whether the prepared calldata
+  // targets the ProgrammableEnvelope (intent-bound, policy enforced onchain)
+  // or the legacy direct USDC transfer path.
+  const [prepRoute, setPrepRoute] = useState<{
+    execution?: "direct" | "envelope";
+    envelopeAddress?: string;
+  } | null>(null);
 
   const parsedAmount = parseUsdcBaseUnits(data.amount);
   const baseUnitsString = parsedAmount.baseUnits?.toString() || "0";
@@ -81,6 +88,10 @@ export function PaymentReview({ data, onBack, onSubmitted }: PaymentReviewProps)
       }
 
       const { to, calldata, value, chainId } = prepRes;
+      setPrepRoute({
+        execution: prepRes.execution,
+        envelopeAddress: prepRes.envelopeAddress
+      });
       const targetChainId = Number(chainId || 5042);
 
       setStatusMessage("Awaiting user wallet signature...");
@@ -201,7 +212,25 @@ export function PaymentReview({ data, onBack, onSubmitted }: PaymentReviewProps)
         </div>
         <div className="flex justify-between items-center py-1 border-b border-border-subtle">
           <span className="text-text-muted">Contract</span>
-          <span className="font-mono text-xs text-text-secondary">0x3600000000000000000000000000000000000000</span>
+          {prepRoute?.execution === "envelope" && prepRoute.envelopeAddress ? (
+            <span className="font-mono text-xs text-emerald-400 truncate max-w-[220px]">
+              {prepRoute.envelopeAddress.slice(0, 10)}…{prepRoute.envelopeAddress.slice(-6)}
+            </span>
+          ) : (
+            <span className="font-mono text-xs text-text-secondary">0x3600000000000000000000000000000000000000</span>
+          )}
+        </div>
+        <div className="flex justify-between items-center py-1 border-b border-border-subtle">
+          <span className="text-text-muted">Route</span>
+          <span
+            className={`text-xs font-medium ${
+              prepRoute?.execution === "envelope" ? "text-emerald-400" : "text-text-secondary"
+            }`}
+          >
+            {prepRoute?.execution === "envelope"
+              ? "Programmable Envelope (onchain policy)"
+              : "Direct USDC transfer"}
+          </span>
         </div>
         <div className="flex justify-between items-center py-1 border-b border-border-subtle">
           <span className="text-text-muted">Recipient</span>

@@ -10,6 +10,10 @@ import {
 import type { createApiAppAsync } from "./index.ts";
 import type { PrivyTokenVerifier } from "../../../packages/adapters/privy/src/index.ts";
 import {
+  encodeEnvelopeExecutePayment,
+  paymentIdHash
+} from "../../../packages/adapters/arc/src/index.ts";
+import {
   createWalletLinkChallenge,
   verifyWalletLinkChallenge,
   type WalletLinkChallenge
@@ -750,6 +754,45 @@ export const routeTable: RouteDefinition[] = [
       const amountBaseUnits =
         intent.amountBaseUnits || `${Math.round(Number(intent.amount || "0") * 1_000_000)}`;
 
+      // Intent-bound execution (contract patch): when the intent names a
+      // deployed ProgrammableEnvelope, calldata targets executePayment on
+      // that envelope — caps, UTC schedule and allowlist are enforced
+      // ONCHAIN before any USDC moves. Otherwise fall through to a raw
+      // ERC-20 transfer on the USDC contract (legacy direct path).
+      if (intent.envelopeAddress) {
+        let envelopeAmount: bigint;
+        try {
+          envelopeAmount = BigInt(amountBaseUnits);
+        } catch {
+          return sendJson(response, 400, {
+            error: "invalid_amount_base_units",
+            code: "invalid_amount_base_units",
+            message: "Intent amount could not be converted to 6-decimal base units",
+            requestId
+          });
+        }
+        const envelopeAddress = intent.envelopeAddress.toLowerCase() as `0x${string}`;
+        return sendJson(response, 200, {
+          intentId: intent.id,
+          senderAddress,
+          // The transaction targets the envelope; the recipient is encoded
+          // inside the call, not used as the transaction destination.
+          to: envelopeAddress,
+          calldata: encodeEnvelopeExecutePayment({
+            paymentIdHash: paymentIdHash(intent.id),
+            recipient: to,
+            amountBaseUnits: envelopeAmount
+          }),
+          value: "0" as const,
+          chainId: intent.chainId || 5042,
+          tokenAddress,
+          amountBaseUnits,
+          expiresAt: intent.expiresAt || new Date(Date.now() + 3600_000).toISOString(),
+          execution: "envelope" as const,
+          envelopeAddress
+        });
+      }
+
       // Generate calldata: ERC-20 transfer(address to, uint256 value)
       const recipientClean = to.replace(/^0x/, "").padStart(64, "0");
       let amountHex = "0".repeat(64);
@@ -769,7 +812,8 @@ export const routeTable: RouteDefinition[] = [
         chainId: intent.chainId || 5042,
         tokenAddress,
         amountBaseUnits,
-        expiresAt: intent.expiresAt || new Date(Date.now() + 3600_000).toISOString()
+        expiresAt: intent.expiresAt || new Date(Date.now() + 3600_000).toISOString(),
+        execution: "direct" as const
       });
     }
   },

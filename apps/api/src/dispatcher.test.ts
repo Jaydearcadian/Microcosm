@@ -375,6 +375,58 @@ test("Task 6: Centralized /v1 route dispatcher and tenant authorization", async 
     assert.equal(prep.value, "0"); // zero native ETH transfer
     assert.ok(prep.calldata.startsWith("0x"));
 
+    // 4.1b Intent-bound envelope execution: an intent naming a deployed
+    // ProgrammableEnvelope prepares executePayment calldata targeting the
+    // envelope (onchain policy), not a raw USDC transfer.
+    const envelopeAddress = "0x4444444444444444444444444444444444444444";
+    const envIntentRes = await fetch(`${server.url}/v1/intents`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${aliceToken}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        type: "send_money",
+        envelopeId: "env_alice_payroll",
+        recipientId: aliceRcp.id,
+        amount: "10.00",
+        asset: "USDC",
+        executedAt: new Date().toISOString(),
+        spentToday: "0.00",
+        envelopeAddress
+      })
+    });
+    assert.equal(envIntentRes.status, 201);
+    const envIntent = (await envIntentRes.json()).intent;
+
+    const envPrepRes = await fetch(`${server.url}/v1/payments/prepare`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${aliceToken}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({ intentId: envIntent.id })
+    });
+    assert.equal(envPrepRes.status, 200);
+    const envPrep = await envPrepRes.json();
+    assert.equal(envPrep.execution, "envelope");
+    assert.equal(envPrep.to, envelopeAddress);
+    assert.equal(envPrep.envelopeAddress, envelopeAddress);
+    // executePayment selector + paymentId + recipient + amount words
+    assert.ok(envPrep.calldata.startsWith("0xa97274c2"));
+    assert.equal(envPrep.calldata.length, 2 + 8 + 64 * 3);
+    // 10 USDC in six-decimal base units = 10000000 = 0x989680
+    assert.ok(
+      envPrep.calldata.endsWith(
+        "0000000000000000000000000000000000000000000000000000000000989680"
+      )
+    );
+    // Still strictly decoupled: preparation alone created no payment
+    const envPaymentsList = await fetch(`${server.url}/v1/payments`, {
+      headers: { authorization: `Bearer ${aliceToken}` }
+    }).then((r) => r.json());
+    assert.equal(envPaymentsList.length, 0);
+
     // Ensure preparation did not execute or create payment
     const paymentsListBefore = await fetch(`${server.url}/v1/payments`, {
       headers: { authorization: `Bearer ${aliceToken}` }

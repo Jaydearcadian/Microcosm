@@ -184,6 +184,50 @@ test("PreparePaymentResponseSchema requires zero native value and explicit calld
   assert.throws(() => PreparePaymentResponseSchema.parse({ ...prep, value: "100" }));
 });
 
+test("PreparePaymentResponseSchema accepts intent-bound envelope execution mode", () => {
+  const prep = {
+    intentId: "int_123",
+    senderAddress: "0x0000000000000000000000000000000000000001",
+    to: "0x4444444444444444444444444444444444444444",
+    calldata:
+      "0xa97274c2696e74656e745f3100000000000000000000000000000000000000000000000000000000000000000000000022222222222222222222222222222222222222220000000000000000000000000000000000000000000000000000000002625a00",
+    value: "0",
+    chainId: 5042,
+    tokenAddress: "0x3600000000000000000000000000000000000000",
+    amountBaseUnits: "40000000",
+    expiresAt: "2026-10-13T12:05:00.000Z",
+    execution: "envelope",
+    envelopeAddress: "0x4444444444444444444444444444444444444444"
+  } as const;
+
+  const parsed = PreparePaymentResponseSchema.parse(prep);
+  assert.equal(parsed.execution, "envelope");
+  assert.equal(parsed.envelopeAddress, "0x4444444444444444444444444444444444444444");
+
+  // Unknown modes and malformed addresses must still fail-closed
+  assert.throws(() =>
+    PreparePaymentResponseSchema.parse({ ...prep, execution: "indirect" })
+  );
+  assert.throws(() =>
+    PreparePaymentResponseSchema.parse({ ...prep, envelopeAddress: "not-an-address" })
+  );
+  // Legacy direct responses (no execution field) remain valid
+  assert.equal(
+    PreparePaymentResponseSchema.safeParse({
+      intentId: "int_124",
+      senderAddress: "0x0000000000000000000000000000000000000001",
+      to: "0x0000000000000000000000000000000000000002",
+      calldata: "0xa9059cbb",
+      value: "0",
+      chainId: 5042,
+      tokenAddress: "0x3600000000000000000000000000000000000000",
+      amountBaseUnits: "25000000",
+      expiresAt: "2026-10-13T12:05:00.000Z"
+    }).success,
+    true
+  );
+});
+
 test("RecordSubmissionRequestSchema requires valid txHash, chainId, and sender", () => {
   const sub = {
     spaceId: "spc_001",

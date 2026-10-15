@@ -71,5 +71,6 @@ checkpoints/
 output/
 .vercel
 .skills/
+scratch/
 .env*
 *.tsbuildinfo

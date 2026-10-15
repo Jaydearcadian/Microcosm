@@ -1,7 +1,10 @@
 {
   "network": "arc-testnet",
   "chainId": 5042002,
+  "token": "0x0000000000000000000000000000000000000000",
   "settlementRouter": "0x0000000000000000000000000000000000000000",
   "claimEscrow": "0x0000000000000000000000000000000000000000",
-  "deployedAt": "2026-04-13T00:00:00.000Z"
+  "envelopeFactory": "0x0000000000000000000000000000000000000000",
+  "deployedAt": null,
+  "status": "example-only; populate only from a verified deployment receipt"
 }

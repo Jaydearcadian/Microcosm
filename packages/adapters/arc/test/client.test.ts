@@ -74,18 +74,33 @@ test("createArcContractClient writes escrow creation and claims through ClaimEsc
   const createHash = await client.createClaimEscrow({
     paymentId: "pay_2",
     amount: "40.00",
-    lookupKey: "alice@gmail.com"
+    recipient: "0x2222222222222222222222222222222222222222",
+    expiresAt: 1_700_000_100n
   });
   const claimHash = await client.claimEscrow({
-    paymentId: "pay_2",
-    recipient: "0x2222222222222222222222222222222222222222"
+    paymentId: "pay_2"
+  });
+  const refundHash = await client.refundEscrow({
+    paymentId: "pay_2"
   });
 
   assert.equal(createHash, "0xescrow_tx");
   assert.equal(claimHash, "0xescrow_tx");
-  assert.equal(writes.length, 2);
+  assert.equal(refundHash, "0xescrow_tx");
+  assert.equal(writes.length, 3);
   assert.equal(writes[0]?.functionName, "createEscrow");
+  assert.deepEqual(writes[0]?.args, [
+    "0x7061795f32000000000000000000000000000000000000000000000000000000",
+    ARC_USDC_ADDRESS,
+    "0x2222222222222222222222222222222222222222",
+    40_000_000n,
+    1_700_000_100n
+  ]);
   assert.equal(writes[1]?.functionName, "claim");
+  assert.deepEqual(writes[1]?.args, [
+    "0x7061795f32000000000000000000000000000000000000000000000000000000"
+  ]);
+  assert.equal(writes[2]?.functionName, "refund");
 });
 
 test("createArcContractClient exposes receipt confirmation and event reads", async () => {
@@ -192,5 +207,90 @@ test("verifyUsdcTransfer validates exact token, recipient, sender, and base unit
     amountBaseUnits: 10_000_000n
   });
   assert.equal(pending.status, "pending");
+});
+
+test("encodeEnvelopeExecutePayment matches viem's ABI encoder exactly", async () => {
+  const { encodeFunctionData } = await import("viem");
+  const {
+    encodeEnvelopeExecutePayment,
+    ENVELOPE_EXECUTE_SELECTOR,
+    envelopeAbi,
+    paymentIdHash
+  } = await import("../src/index.ts");
+
+  const paymentHash = paymentIdHash("intent_7");
+  const recipient = "0x2222222222222222222222222222222222222222";
+
+  // Independent oracle: viem derives selector + encoding from the ABI itself.
+  const expected = encodeFunctionData({
+    abi: envelopeAbi,
+    functionName: "executePayment",
+    args: [paymentHash as `0x${string}`, recipient as `0x${string}`, 40_000_000n]
+  });
+
+  const actual = encodeEnvelopeExecutePayment({
+    paymentIdHash: paymentHash,
+    recipient,
+    amountBaseUnits: 40_000_000n
+  });
+
+  assert.equal(ENVELOPE_EXECUTE_SELECTOR, expected.slice(0, 10));
+  assert.equal(actual, expected);
+  // selector (4B) + 3 padded words = 2 + 8 + 192 chars
+  assert.equal(actual.length, 2 + 8 + 64 * 3);
+  // six-decimal base units: 40 USDC -> 0x2625a00 trailing word
+  assert.ok(actual.endsWith("0000000000000000000000000000000000000000000000000000000002625a00"));
+});
+
+test("createEnvelope writes the factory policy call with six-decimal units", async () => {
+  const writes: Array<Record<string, unknown>> = [];
+  const client = createArcContractClient({
+    privateKey: "0xabc",
+    contracts: {
+      envelopeFactory: "0x9999999999999999999999999999999999999999"
+    },
+    walletClient: {
+      async writeContract(input: Record<string, unknown>) {
+        writes.push(input);
+        return "0xfactory_tx";
+      }
+    } as never,
+    publicClient: {
+      async getTransactionReceipt() {
+        return { status: "success", blockHash: "0xblock" };
+      },
+      async getLogs() {
+        return [];
+      }
+    } as never
+  });
+
+  const tx = await client.createEnvelope({
+    maxPerTransaction: "100.00",
+    maxPerDay: "250.00",
+    automaticApprovalLimit: "20.00",
+    allowedDaysMask: 127,
+    startHourUtc: 0,
+    endHourUtc: 24,
+    recipientAllowlistEnabled: true,
+    initialRecipients: ["0x2222222222222222222222222222222222222222"],
+    initialOperators: ["0x3333333333333333333333333333333333333333"]
+  });
+
+  assert.equal(tx, "0xfactory_tx");
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0]?.address, "0x9999999999999999999999999999999999999999");
+  assert.equal(writes[0]?.functionName, "createEnvelope");
+  assert.deepEqual(writes[0]?.args, [
+    100_000_000n,
+    250_000_000n,
+    20_000_000n,
+    127,
+    0,
+    24,
+    true,
+    ["0x2222222222222222222222222222222222222222"],
+    ["0x3333333333333333333333333333333333333333"]
+  ]);
 });
 
