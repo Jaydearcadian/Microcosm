@@ -13,6 +13,16 @@ import { InteractiveSimulator } from "../features/landing/InteractiveSimulator.t
 import { DeveloperTerminal } from "../features/landing/DeveloperTerminal.tsx";
 import { LandingFooter } from "../features/landing/LandingFooter.tsx";
 
+/**
+ * HomePage - Layer 0 public marketing surface + Layer 1 in-app cockpit.
+ *
+ * Topology per docs/design-handoff.md section 2: the landing experience and the
+ * authenticated cockpit share one design-token layer, so crossing the boundary
+ * produces zero context shock. A persistent switcher lets reviewers traverse both.
+ *
+ * Accessibility: a skip link jumps past the switcher straight to the landing
+ * content, and the marketing surface is wrapped in a single <main> landmark.
+ */
 export default function HomePage() {
   const { authenticated, user, activeSpace, login } = useSession();
   const [viewMode, setViewMode] = useState<"landing" | "app">("landing");
@@ -24,69 +34,71 @@ export default function HomePage() {
     setViewMode("app");
   };
 
-  return (
-    <main className="min-h-screen bg-[#090b12] text-slate-100 flex flex-col font-sans selection:bg-cyan-500/30 selection:text-cyan-200">
-      {/* Top Banner Mode Switcher for Judges & Reviewers */}
-      <div className="w-full bg-slate-950/90 border-b border-slate-800/80 py-1.5 px-4 z-50 text-xs font-mono flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full bg-emerald-400" />
-          <span className="text-slate-400">Microcosm Arc Mainnet v0.1:</span>
-          <span className="text-white font-semibold">{viewMode === "landing" ? "Landing Page View" : "In-App Cockpit View"}</span>
-        </div>
+  const nextMode = viewMode === "landing" ? "app" : "landing";
+  const nextModeLabel = viewMode === "landing" ? "In-App Cockpit" : "Landing Page";
 
-        <div className="flex items-center gap-2">
+  return (
+    <div className="flex min-h-screen flex-col bg-canvas font-sans text-ink selection:bg-arc/30 selection:text-ink">
+      <a
+        href="#landing-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:min-h-[48px] focus:rounded-lg focus:bg-ink focus:px-4 focus:py-3 focus:font-mono focus:text-sm focus:font-semibold focus:text-ink-inverse"
+      >
+        Skip to main content
+      </a>
+
+      {/* Viewport switcher for judges & reviewers */}
+      <div className="relative z-50 w-full border-b border-ink/10 bg-canvas/90 px-4 py-1.5">
+        <div className="mx-auto flex max-w-[1280px] items-center justify-between gap-4 font-mono text-xs">
+          <p className="flex items-center gap-2">
+            <span className="arc-pulse h-2 w-2 shrink-0 rounded-full bg-success" aria-hidden="true" />
+            <span className="text-ink-secondary">Microcosm Arc Mainnet v0.1:</span>
+            <span className="font-semibold text-ink" aria-live="polite">
+              {viewMode === "landing" ? "Landing Page View" : "In-App Cockpit View"}
+            </span>
+          </p>
+
           <button
-            onClick={() => setViewMode(viewMode === "landing" ? "app" : "landing")}
-            className="px-2.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 transition-all cursor-pointer flex items-center gap-1.5"
+            type="button"
+            onClick={() => setViewMode(nextMode)}
+            className="inline-flex min-h-[48px] shrink-0 items-center gap-1.5 rounded border border-ink/15 bg-canvas-elevated px-2.5 text-arc transition-colors duration-250 ease-[var(--ease-spring)] hover:border-arc/50"
           >
-            <span>Switch to {viewMode === "landing" ? "In-App Cockpit" : "Landing Page"}</span>
-            <span className="text-[10px]">&rarr;</span>
+            <span>Switch to {nextModeLabel}</span>
+            <span aria-hidden="true">&rarr;</span>
           </button>
         </div>
       </div>
 
       {viewMode === "landing" ? (
-        <div className="flex flex-col w-full relative grid-bg-pattern">
-          {/* Floating Navigation Bar */}
+        <main id="landing-content" className="grid-bg-pattern relative flex w-full flex-col">
           <LandingNav onLaunchApp={handleLaunchApp} isAuthenticated={authenticated} />
-
-          {/* Hero Section with Asymmetric Cockpit Simulator */}
           <HeroSection onLaunchApp={handleLaunchApp} />
-
-          {/* Live Arc Telemetry Bar */}
           <TelemetryStrip />
-
-          {/* Core Dilemma: Keys vs Envelopes */}
           <DilemmaSection />
-
-          {/* Four Core Primitives */}
           <PrimitivesSection />
-
-          {/* Full Interactive Policy Simulator */}
           <InteractiveSimulator />
-
-          {/* AI Agent & Developer Integration */}
           <DeveloperTerminal />
-
-          {/* Footer */}
           <LandingFooter />
-        </div>
+        </main>
       ) : (
-        <AppShell
-          activeSpaceName={activeSpace?.name || "Personal Space"}
-          principalHandle={user?.id}
-        >
-          <div className="mb-4">
-            <button
-              onClick={() => setViewMode("landing")}
-              className="text-xs font-mono text-cyan-400 hover:underline flex items-center gap-1 mb-2 cursor-pointer"
-            >
-              <span>&larr; Back to Landing Page</span>
-            </button>
-          </div>
-          <HomeOverview />
-        </AppShell>
+        <main id="landing-content" className="flex w-full flex-1 flex-col">
+          <AppShell
+            activeSpaceName={activeSpace?.name || "Personal Space"}
+            principalHandle={user?.id}
+          >
+            <div className="mb-4">
+              <button
+                type="button"
+                onClick={() => setViewMode("landing")}
+                className="inline-flex min-h-[48px] items-center gap-1 font-mono text-xs text-arc transition-opacity duration-250 ease-[var(--ease-spring)] hover:opacity-80"
+              >
+                <span aria-hidden="true">&larr;</span>
+                <span>Back to Landing Page</span>
+              </button>
+            </div>
+            <HomeOverview />
+          </AppShell>
+        </main>
       )}
-    </main>
+    </div>
   );
 }

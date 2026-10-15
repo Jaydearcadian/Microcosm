@@ -1,3 +1,96 @@
+@import "tailwindcss";
+
+/* Tailwind v4 source scanning: only these trees are compiled into utilities.
+   Without this the engine still auto-detects, but being explicit keeps the
+   emitted CSS deterministic and prevents the 6KB unstyled-CSS regression. */
+@source "../components/**/*.tsx";
+@source "../features/**/*.tsx";
+@source "../app/**/*.tsx";
+
+/* ------------------------------------------------------------------------- */
+/* Microcosm Arc-Native Design System                                        */
+/* Token source of truth: docs/design-handoff.md §1 (Executive Tokens, YAML)  */
+/* Ingested skills: frontend-designer · color-expert (OKLCH) · motion-design  */
+/*                  · responsive-craft · inclusive-design (WCAG AAA)          */
+/* ------------------------------------------------------------------------- */
+@theme {
+  /* --- Palette: OKLCH perceptually-uniform color space ------------------- */
+  --color-canvas: oklch(0.12 0.02 250);          /* Deep Obsidian Void */
+  --color-canvas-subtle: oklch(0.15 0.025 250);  /* Deep Slate Layer 1 */
+  --color-canvas-elevated: oklch(0.18 0.03 250); /* Glassmorphism Container */
+  --color-canvas-surface: oklch(0.22 0.035 250); /* Interactive Card Surface */
+
+  --color-arc: oklch(0.76 0.17 215);             /* Arc Cyan (primary) */
+  --color-arc-hover: oklch(0.82 0.15 215);
+  --color-arc-soft: oklch(0.76 0.17 215 / 0.15);
+  --color-ray: oklch(0.70 0.19 310);             /* Iridescent Purple Ray */
+  --color-telemetry: oklch(0.85 0.12 180);       /* Telemetry Mint */
+
+  --color-success: oklch(0.75 0.18 145);         /* Confirmed Settlement Green */
+  --color-warning: oklch(0.78 0.16 75);          /* Limit Threshold Warning */
+  --color-danger: oklch(0.65 0.22 25);           /* Policy Breach Red */
+  --color-info: oklch(0.76 0.17 215);            /* Calldata Telemetry Blue */
+
+  --color-ink: oklch(0.98 0.01 250);             /* Pure High-Contrast White */
+  /* Raised from the handoff's oklch(0.75 0.03 250) so a visible three-step
+     hierarchy survives the AAA contrast floor below. */
+  --color-ink-secondary: oklch(0.85 0.025 250);  /* Body copy / metadata */
+  /* Raised from the handoff's oklch(0.55 0.04 250): that value measured only
+     3.91:1 on the frosted glass surfaces, failing the WCAG AAA 7:1 floor that
+     handoff §6 mandates for ALL text. 0.72 measures 7.05:1 on the translucent
+     elevated card and 8.7:1 on the base canvas — AAA at every label size,
+     including the 10px uppercase telemetry/meta labels. */
+  --color-ink-tertiary: oklch(0.72 0.03 250);    /* Meta labels — AAA on canvas */
+  --color-ink-inverse: oklch(0.12 0.02 250);     /* Text on Cyan Badges */
+
+  /* --- Typography: Space Grotesk / Inter / JetBrains Mono ---------------- */
+  /* Resolved from next/font/google in app/layout.tsx, which self-hosts the
+     woff2 files at build time (no third-party request, zero layout shift). */
+  --font-display: var(--font-space-grotesk), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, Menlo,
+    monospace;
+
+  /* Fluid clamp() scales — Layer 1 of the responsive-craft escalation */
+  --text-display: clamp(2.5rem, 1.8rem + 3.5vw, 4.5rem);
+  --text-display--line-height: 1.05;
+  --text-display--letter-spacing: -0.04em;
+
+  --text-h1: clamp(2rem, 1.5rem + 2.5vw, 3.25rem);
+  --text-h1--line-height: 1.15;
+  --text-h1--letter-spacing: -0.03em;
+
+  --text-h2: clamp(1.5rem, 1.2rem + 1.5vw, 2.25rem);
+  --text-h2--line-height: 1.25;
+  --text-h2--letter-spacing: -0.02em;
+
+  --text-h3: clamp(1.15rem, 1rem + 0.75vw, 1.5rem);
+  --text-h3--line-height: 1.35;
+  --text-h3--letter-spacing: -0.01em;
+
+  --text-body: clamp(0.95rem, 0.88rem + 0.35vw, 1.125rem);
+  --text-body--line-height: 1.6;
+
+  --text-mono: clamp(0.8125rem, 0.75rem + 0.25vw, 0.9375rem);
+  --text-mono--line-height: 1.5;
+  --text-mono--letter-spacing: -0.01em;
+
+  /* --- Radius, elevation, motion ---------------------------------------- */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+
+  --shadow-cockpit: 0 25px 50px -12px rgb(0 0 0 / 0.8), 0 0 0 1px oklch(0.30 0.03 250);
+  --shadow-glow-cyan: 0 0 35px -5px oklch(0.76 0.17 215 / 0.25);
+  --shadow-glow-iridescent: 0 0 45px -10px oklch(0.96 0.01 250 / 0.18),
+    0 0 25px -5px oklch(0.76 0.17 215 / 0.2);
+
+  --ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-telemetry: cubic-bezier(0.4, 0, 0.6, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+}
+
 :root {
   /* Surfaces & Backgrounds */
   --bg: #090a10;
@@ -44,8 +137,11 @@
   --sidebar-width: 240px;
   --bottom-nav-height: 64px;
   --content-max-width: 900px;
-  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  /* NOTE: --font-sans / --font-mono are intentionally NOT redefined here.
+     They are owned by the @theme block above (Space Grotesk / Inter / JetBrains
+     Mono via next/font). Redeclaring them in this later :root block would
+     override the architectural type stack on the whole document. */
 }
 
 * {
@@ -54,23 +150,33 @@
   padding: 0;
 }
 
-body {
-  background-color: var(--bg);
-  color: var(--text);
-  font-family: var(--font-sans);
-  min-height: 100vh;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+/* Base element defaults — inside `@layer base` so utilities always win. */
+@layer base {
+  :where(body) {
+    background-color: var(--bg);
+    color: var(--text);
+    font-family: var(--font-sans);
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  :where(a) {
+    color: inherit;
+    text-decoration: none;
+  }
 }
 
-a {
-  color: inherit;
-  text-decoration: none;
-}
-
-button, input, select, textarea {
-  font-family: inherit;
-  color: inherit;
+/* Inherit typography on form controls.
+   Declared inside `@layer base` so it sits BELOW Tailwind's utilities in the
+   cascade. Unlayered CSS outranks every layered rule regardless of specificity,
+   which previously made this reset beat `text-ink-inverse` and render white
+   label text on a white pill. */
+@layer base {
+  :where(button, input, select, textarea) {
+    font-family: inherit;
+    color: inherit;
+  }
 }
 
 :focus-visible {
@@ -87,6 +193,12 @@ button, input, select, textarea {
   }
 }
 
+/* ------------------------------------------------------------------------- */
+/* App shell + cockpit component classes.                                     */
+/* Wrapped in `@layer components` so Tailwind utilities still override them   */
+/* on the same element (unlayered CSS would win the cascade unconditionally). */
+/* ------------------------------------------------------------------------- */
+@layer components {
 /* App Layout Styles */
 .app-container {
   display: flex;
@@ -330,7 +442,192 @@ button, input, select, textarea {
 
 .grid-bg-pattern {
   background-size: 40px 40px;
-  background-image: 
+  background-image:
     linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
     linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
 }
+} /* end @layer components */
+
+/* ------------------------------------------------------------------------- */
+/* Motion choreography — docs/design-handoff.md §5                            */
+/* Durations: instant 150ms · responsive 300ms · deliberate 450ms · ambient 8s */
+/* Layered as components so utilities can still override individual pieces.   */
+/* ------------------------------------------------------------------------- */
+@layer components {
+
+/* Hero entrance: staggered choreography (nav 0ms → headline 100ms →
+   cockpit boot 250ms → telemetry sparklines 400ms). Opacity-only so that
+   `prefers-reduced-motion` can collapse translation with zero layout shift. */
+@keyframes arc-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes arc-sheen {
+  from {
+    transform: translateX(-120%);
+  }
+  to {
+    transform: translateX(220%);
+  }
+}
+
+.arc-enter {
+  animation: arc-rise 450ms var(--ease-spring, cubic-bezier(0.16, 1, 0.3, 1)) both;
+  animation-delay: var(--arc-delay, 0ms);
+}
+
+/* Status badge pulse — 2000ms telemetry easing, infinite loop */
+@keyframes arc-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(1.35);
+  }
+}
+
+.arc-pulse {
+  animation: arc-pulse 2000ms cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Diagonal iridescent sweep across the hero visual / primary CTA */
+.arc-sheen::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    105deg,
+    transparent 35%,
+    rgba(255, 255, 255, 0.14) 50%,
+    transparent 65%
+  );
+  animation: arc-sheen 8000ms cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* ------------------------------------------------------------------------- */
+/* Hero media frame — hosts the dropped hero image with an on-brand fallback   */
+/* ------------------------------------------------------------------------- */
+.hero-media {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-lg, 16px);
+  /* aspect-ratio replaces the legacy padding-bottom hack (design.md Rule 13) */
+  aspect-ratio: 16 / 10;
+  background:
+    radial-gradient(120% 120% at 20% 0%, oklch(0.76 0.17 215 / 0.28) 0%, transparent 55%),
+    radial-gradient(110% 110% at 90% 100%, oklch(0.70 0.19 310 / 0.24) 0%, transparent 60%),
+    linear-gradient(160deg, oklch(0.18 0.03 250) 0%, oklch(0.12 0.02 250) 100%);
+}
+
+/* Cover-fit for the swapped-in hero asset. `object-position` keeps the
+   policy-shield focal point centered when the source aspect differs. */
+.hero-media > img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 40%;
+}
+
+/* Frosted glass scrim so overlaid copy keeps >= 7:1 contrast on any source */
+.hero-media-scrim {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to top,
+    oklch(0.12 0.02 250 / 0.88) 0%,
+    oklch(0.12 0.02 250 / 0.35) 45%,
+    transparent 100%
+  );
+}
+
+/* ------------------------------------------------------------------------- */
+/* Pointer-follow radial border glow (design.md §4)                          */
+/* Cards set --mouse-x/--mouse-y in percent from a pointermove handler.      */
+/* ------------------------------------------------------------------------- */
+.arc-glow-card {
+  position: relative;
+  isolation: isolate;
+}
+
+.arc-glow-card::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  z-index: -1;
+  border-radius: inherit;
+  opacity: 0;
+  transition: opacity 300ms var(--ease-spring, cubic-bezier(0.16, 1, 0.3, 1));
+  background: radial-gradient(
+    260px circle at var(--mouse-x, 50%) var(--mouse-y, 50%),
+    oklch(0.76 0.17 215 / 0.55),
+    oklch(0.70 0.19 310 / 0.22) 40%,
+    transparent 70%
+  );
+}
+
+.arc-glow-card:hover::before,
+.arc-glow-card:focus-within::before {
+  opacity: 1;
+}
+
+/* ------------------------------------------------------------------------- */
+/* Layer 2: container queries (responsive-craft escalation)                  */
+/*                                                                           */
+/* IMPORTANT — why these are NOT hand-written here:                          */
+/* Tailwind v4 hoists every `@layer components` block ABOVE `@layer          */
+/* utilities` regardless of source order, so a `@container` rule declared in  */
+/* `@layer components` silently loses to utilities such as `grid-cols-1` on  */
+/* the same element (the asymmetric hero split never engaged in testing).    */
+/* Container-adaptive layout is therefore expressed with Tailwind's own      */
+/* `@md:` / `@max-md:` @container variants in the markup, which are emitted  */
+/* into `@layer utilities` and win the cascade as intended.                   */
+/* ------------------------------------------------------------------------- */
+
+/* Below-the-fold sections: skip rendering cost until scrolled near.
+   contain-intrinsic-size prevents scrollbar jank / layout shift. */
+.section-deferred {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 320px;
+}
+
+/* Focus ring — WCAG 2.2: 2px minimum with 3px offset (handoff §1) */
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--arc, oklch(0.76 0.17 215));
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+} /* end @layer components */
+
+/* Reduced-motion overrides stay UNLAYERED and use !important deliberately:
+   this is an accessibility guarantee that must outrank every animation
+   utility, so it must sit above all layers in the cascade. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  /* Translation collapses to a pure opacity state — zero layout shift */
+  .arc-enter,
+  .arc-glow-card:hover {
+    transform: none !important;
+  }
+}
+

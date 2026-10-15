@@ -2,10 +2,15 @@
 
 import React, { useState } from "react";
 
-export function DeveloperTerminal() {
-  const [activeTab, setActiveTab] = useState<"ts" | "mcp" | "curl">("ts");
+type TabId = "ts" | "mcp" | "curl";
 
-  const tsCode = `import { createClient } from "@mcosm/client";
+const TABS: ReadonlyArray<{ id: TabId; label: string }> = [
+  { id: "ts", label: "TypeScript" },
+  { id: "mcp", label: "MCP Server" },
+  { id: "curl", label: "cURL API" }
+];
+
+const tsCode = `import { createClient } from "@mcosm/client";
 
 // Initialize Microcosm inside your AI Agent workflow
 const mcosm = createClient({
@@ -27,8 +32,7 @@ if (intent.status === "approved") {
   const payment = await mcosm.payments.prepare({ intentId: intent.id });
   console.log("Ready to sign calldata:", payment.calldata);
 }`;
-
-  const mcpCode = `{
+const mcpCode = `{
   "mcpServers": {
     "microcosm": {
       "command": "npx",
@@ -41,8 +45,7 @@ if (intent.status === "approved") {
     }
   }
 }`;
-
-  const curlCode = `# 1. Declare intent against envelope
+const curlCode = `# 1. Declare intent against envelope
 curl -X POST https://microcosmonarc.vercel.app/v1/intents \\
   -H "Authorization: Bearer $SESSION_TOKEN" \\
   -H "x-space-id: space_marketing" \\
@@ -55,7 +58,29 @@ curl -X POST https://microcosmonarc.vercel.app/v1/intents \\
 
 # 2. Inspect status (201 Created with status: "approved")`;
 
-  return (
+const SNIPPETS: Record<TabId, string> = {
+  ts: tsCode,
+  mcp: mcpCode,
+  curl: curlCode
+};
+
+export function DeveloperTerminal() {
+  const [activeTab, setActiveTab] = useState<TabId>("ts");
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(SNIPPETS[activeTab]);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard can be unavailable (insecure context, denied permission).
+      // The snippet stays selectable in the <pre>, so the flow still works.
+      setCopied(false);
+    }
+  };
+
+        return (
     <section id="agents" className="py-24 px-4 max-w-6xl mx-auto w-full">
       <div className="flex flex-col gap-3 mb-12">
         <span className="text-xs font-mono uppercase tracking-widest text-cyan-400 font-semibold">
@@ -81,39 +106,93 @@ curl -X POST https://microcosmonarc.vercel.app/v1/intents \\
             <span className="text-xs font-mono text-slate-400 ml-2">agent-runtime :: microcosm-sdk</span>
           </div>
 
-          <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800">
-            <button
-              onClick={() => setActiveTab("ts")}
-              className={`px-3 py-1 rounded text-xs font-mono font-medium transition-all ${
-                activeTab === "ts" ? "bg-cyan-950 text-cyan-400 border border-cyan-800/60" : "text-slate-400 hover:text-white"
-              }`}
-            >
-              TypeScript
-            </button>
-            <button
-              onClick={() => setActiveTab("mcp")}
-              className={`px-3 py-1 rounded text-xs font-mono font-medium transition-all ${
-                activeTab === "mcp" ? "bg-cyan-950 text-cyan-400 border border-cyan-800/60" : "text-slate-400 hover:text-white"
-              }`}
-            >
-              MCP Server
-            </button>
-            <button
-              onClick={() => setActiveTab("curl")}
-              className={`px-3 py-1 rounded text-xs font-mono font-medium transition-all ${
-                activeTab === "curl" ? "bg-cyan-950 text-cyan-400 border border-cyan-800/60" : "text-slate-400 hover:text-white"
-              }`}
-            >
-              cURL API
-            </button>
+          {/* Proper ARIA tablist (handoff §6): arrow-key navigation and a
+              "n of 3, selected" announcement. Every tab keeps a 48px minimum
+              hit area even though the visual pill is smaller. */}
+          <div
+            role="tablist"
+            aria-label="Agent integration code samples"
+            className="flex items-center gap-1 rounded-lg border border-ink/10 bg-canvas p-1"
+          >
+            {TABS.map((tab) => {
+              const selected = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  role="tab"
+                  id={`devtab-${tab.id}`}
+                  aria-selected={selected}
+                  aria-controls="devtab-panel"
+                  tabIndex={selected ? 0 : -1}
+                  onClick={() => setActiveTab(tab.id)}
+                  onKeyDown={(event) => {
+                    const dir =
+                      event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+                    if (!dir) return;
+                    event.preventDefault();
+                    const next =
+                      TABS[(TABS.findIndex((t) => t.id === activeTab) + dir + TABS.length) % TABS.length];
+                    setActiveTab(next.id);
+                    document.getElementById(`devtab-${next.id}`)?.focus();
+                  }}
+                  className={`inline-flex min-h-[48px] items-center rounded px-3 font-mono text-xs font-medium transition-all duration-250 ease-[var(--ease-spring)] ${
+                    selected
+                      ? "border border-arc/50 bg-arc-soft text-arc"
+                      : "border border-transparent text-ink-secondary hover:text-ink"
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              );
+            })}
           </div>
         </div>
 
-        {/* Code View */}
-        <div className="p-6 font-mono text-xs sm:text-sm text-slate-300 overflow-x-auto leading-relaxed bg-slate-950/90">
-          <pre>
-            <code>{activeTab === "ts" ? tsCode : activeTab === "mcp" ? mcpCode : curlCode}</code>
-          </pre>
+        {/* Code View — the tabpanel referenced by aria-controls above */}
+        <div
+          id="devtab-panel"
+          role="tabpanel"
+          aria-labelledby={`devtab-${activeTab}`}
+          tabIndex={0}
+          className="relative bg-canvas/90"
+        >
+          {/* One-click copy with a 2000ms "COPIED" confirmation (handoff §3.6).
+              The status is announced politely so it is not silently visual. */}
+          <button
+            type="button"
+            onClick={handleCopy}
+            className="absolute right-3 top-3 z-10 inline-flex min-h-[48px] items-center gap-1.5 rounded-lg border border-ink/15 bg-canvas-elevated/90 px-3 font-mono text-[11px] font-medium text-ink-secondary backdrop-blur-md transition-colors duration-250 ease-[var(--ease-spring)] hover:border-arc/50 hover:text-arc"
+          >
+            {copied ? (
+              <>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+                COPIED
+              </>
+            ) : (
+              <>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                </svg>
+                COPY
+              </>
+            )}
+          </button>
+
+          <p role="status" aria-live="polite" className="sr-only">
+            {copied ? "Code sample copied to clipboard" : ""}
+          </p>
+
+          {/* tab-size keeps the TypeScript/JSON snippets aligned; the region
+              scrolls horizontally rather than wrapping mid-token on mobile. */}
+          <div className="overflow-x-auto px-6 py-6 pr-24">
+            <pre className="font-mono text-xs leading-relaxed text-ink-secondary sm:text-sm" style={{ tabSize: 2 }}>
+              <code>{SNIPPETS[activeTab]}</code>
+            </pre>
+          </div>
         </div>
       </div>
     </section>

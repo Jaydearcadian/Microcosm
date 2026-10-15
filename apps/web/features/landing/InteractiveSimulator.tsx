@@ -120,14 +120,18 @@ export function InteractiveSimulator() {
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs text-slate-400">Recipient Security:</label>
+              <label className="text-xs text-ink-secondary" id="recipient-security-label">
+                Recipient Security:
+              </label>
               <button
                 type="button"
                 onClick={() => setAllowlistOnly(!allowlistOnly)}
-                className={`p-2.5 rounded-lg text-xs font-mono border transition-all text-left flex items-center justify-between ${
+                aria-pressed={allowlistOnly}
+                aria-labelledby="recipient-security-label"
+                className={`inline-flex min-h-[48px] items-center justify-between gap-2 rounded-lg border px-3 text-left font-mono text-xs transition-all duration-250 ease-[var(--ease-spring)] ${
                   allowlistOnly
-                    ? "bg-cyan-950/40 border-cyan-700 text-cyan-300"
-                    : "bg-slate-950 border-slate-700 text-slate-400"
+                    ? "border-arc/60 bg-arc-soft text-arc"
+                    : "border-ink/15 bg-canvas text-ink-secondary"
                 }`}
               >
                 <span>Allowlist Only:</span>

@@ -1,0 +1,188 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1200" viewBox="0 0 1920 1200" role="img" aria-label="Microcosm policy shield visual">
+  <title>Microcosm — Policy Shield over an Arc settlement envelope</title>
+  <desc>An architectural hero visual: concentric Arc telemetry rings encircling a policy shield that guards a settlement envelope grid, rendered in Arc Cyan and Iridescent Purple Ray on deep obsidian.</desc>
+
+  <defs>
+    <linearGradient id="canvas" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0b0e17"/>
+      <stop offset="55%" stop-color="#0f1420"/>
+      <stop offset="100%" stop-color="#080a11"/>
+    </linearGradient>
+
+    <linearGradient id="arcBeam" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#22d3ee" stop-opacity="0.15"/>
+      <stop offset="45%" stop-color="#38bdf8" stop-opacity="0.95"/>
+      <stop offset="100%" stop-color="#a78bfa" stop-opacity="0.85"/>
+    </linearGradient>
+
+    <linearGradient id="shieldFace" x1="0.2" y1="0" x2="0.8" y2="1">
+      <stop offset="0%" stop-color="#67e8f9" stop-opacity="0.92"/>
+      <stop offset="50%" stop-color="#38bdf8" stop-opacity="0.72"/>
+      <stop offset="100%" stop-color="#c084fc" stop-opacity="0.80"/>
+    </linearGradient>
+
+    <radialGradient id="coreGlow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0%" stop-color="#7dd3fc" stop-opacity="0.85"/>
+      <stop offset="45%" stop-color="#38bdf8" stop-opacity="0.28"/>
+      <stop offset="100%" stop-color="#38bdf8" stop-opacity="0"/>
+    </radialGradient>
+
+    <radialGradient id="rayGlow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0%" stop-color="#c084fc" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#c084fc" stop-opacity="0"/>
+    </radialGradient>
+
+    <linearGradient id="cellFill" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.30"/>
+      <stop offset="100%" stop-color="#38bdf8" stop-opacity="0.06"/>
+    </linearGradient>
+
+    <linearGradient id="fadeDown" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0b0e17" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#0b0e17" stop-opacity="0.92"/>
+    </linearGradient>
+
+    <pattern id="grid" width="64" height="64" patternUnits="userSpaceOnUse">
+      <path d="M64 0H0V64" fill="none" stroke="#ffffff" stroke-opacity="0.045" stroke-width="1"/>
+    </pattern>
+
+    <filter id="soften" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="26"/>
+    </filter>
+    <filter id="crispGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="7" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- ============ Canvas ============ -->
+  <rect width="1920" height="1200" fill="url(#canvas)"/>
+  <rect width="1920" height="1200" fill="url(#grid)"/>
+
+  <g filter="url(#soften)" opacity="0.75">
+    <ellipse cx="560" cy="330" rx="520" ry="380" fill="#0891b2" opacity="0.34"/>
+    <ellipse cx="1420" cy="880" rx="560" ry="420" fill="#7c3aed" opacity="0.30"/>
+    <ellipse cx="1180" cy="240" rx="380" ry="260" fill="#0ea5e9" opacity="0.20"/>
+  </g>
+  <!-- ============ Concentric Arc telemetry rings ============ -->
+  <g transform="translate(960 600)" fill="none" stroke-linecap="round">
+    <circle r="470" stroke="#38bdf8" stroke-opacity="0.10" stroke-width="1.5"/>
+    <circle r="400" stroke="#38bdf8" stroke-opacity="0.16" stroke-width="1.5"/>
+    <circle r="330" stroke="#a78bfa" stroke-opacity="0.20" stroke-width="1.5"/>
+
+    <path d="M -470 0 A 470 470 0 0 1 -330 -334" stroke="url(#arcBeam)" stroke-width="4" filter="url(#crispGlow)"/>
+    <path d="M 300 265 A 400 400 0 0 1 60 -395" stroke="url(#arcBeam)" stroke-width="3" opacity="0.72"/>
+    <path d="M -180 -278 A 330 330 0 0 1 210 -252" stroke="url(#arcBeam)" stroke-width="2.5" opacity="0.55"/>
+
+    <g stroke="#7dd3fc" stroke-opacity="0.24" stroke-width="1">
+      <path d="M0 -470V-540"/><path d="M0 470V540"/>
+      <path d="M-470 0H-540"/><path d="M470 0H540"/>
+      <path d="M332 -332L381 -381"/><path d="M-332 332L-381 381"/>
+      <path d="M332 332L381 381"/><path d="M-332 -332L-381 -381"/>
+    </g>
+    <g fill="#67e8f9" filter="url(#crispGlow)">
+      <circle cx="0" cy="-540" r="5"/><circle cx="0" cy="540" r="5"/>
+      <circle cx="-540" cy="0" r="5"/><circle cx="540" cy="0" r="5"/>
+      <circle cx="381" cy="-381" r="4"/><circle cx="-381" cy="381" r="4"/>
+      <circle cx="381" cy="381" r="4"/><circle cx="-381" cy="-381" r="4"/>
+    </g>
+  </g>
+
+  <circle cx="960" cy="600" r="300" fill="url(#coreGlow)"/>
+  <circle cx="1330" cy="470" r="240" fill="url(#rayGlow)"/>
+  <!-- ============ Settlement envelope grid ============ -->
+  <g transform="translate(960 600)" opacity="0.55">
+    <g fill="url(#cellFill)" stroke="#38bdf8" stroke-opacity="0.34" stroke-width="1.25">
+      <rect x="-232" y="-232" width="104" height="104" rx="8"/>
+      <rect x="-116" y="-232" width="104" height="104" rx="8"/>
+      <rect x="0"    y="-232" width="104" height="104" rx="8" fill="#38bdf8" fill-opacity="0.42"/>
+      <rect x="116"  y="-232" width="104" height="104" rx="8"/>
+      <rect x="-232" y="-116" width="104" height="104" rx="8"/>
+      <rect x="128"  y="-116" width="104" height="104" rx="8"/>
+      <rect x="-232" y="0"    width="104" height="104" rx="8"/>
+      <rect x="128"  y="0"    width="104" height="104" rx="8"/>
+      <rect x="-232" y="116"  width="104" height="104" rx="8"/>
+      <rect x="128"  y="116"  width="104" height="104" rx="8"/>
+      <rect x="-116" y="128"  width="104" height="104" rx="8"/>
+      <rect x="0"    y="128"  width="104" height="104" rx="8"/>
+    </g>
+  </g>
+
+  <!-- ============ Policy Shield ============ -->
+  <g transform="translate(960 600)" filter="url(#crispGlow)">
+    <path d="M0 -246 L206 -186 V18 C206 132 118 210 0 252 C-118 210 -206 132 -206 18 V-186 Z"
+          fill="#0b1220" fill-opacity="0.72" stroke="url(#arcBeam)" stroke-width="4"/>
+
+    <path d="M0 -204 L170 -152 V16 C170 114 96 178 0 214 C-96 178 -170 114 -170 16 V-152 Z"
+          fill="url(#shieldFace)" fill-opacity="0.20" stroke="url(#arcBeam)" stroke-width="2" stroke-opacity="0.75"/>
+
+    <g transform="translate(0 4)" stroke="#e0f2fe" stroke-width="7" fill="none"
+       stroke-linecap="round" stroke-linejoin="round" opacity="0.96">
+      <rect x="-96" y="-72" width="192" height="144" rx="16"/>
+      <path d="M-96 -40 L0 26 L96 -40"/>
+    </g>
+
+    <g transform="translate(0 74)">
+      <circle r="38" fill="#0b1220" fill-opacity="0.85" stroke="#34d399" stroke-width="4"/>
+      <path d="M-17 2 L-5 15 L19 -13" stroke="#34d399" stroke-width="7"
+            fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+  </g>
+  <!-- ============ Velocity cap rail (left) ============ -->
+  <g transform="translate(232 600)" font-family="'JetBrains Mono', monospace">
+    <rect x="-160" y="-196" width="320" height="392" rx="18" fill="#0b1220" fill-opacity="0.66"
+          stroke="#38bdf8" stroke-opacity="0.30" stroke-width="1.5"/>
+    <text x="0" y="-158" fill="#7dd3fc" font-size="15" text-anchor="middle" letter-spacing="1.6">VELOCITY CAP</text>
+    <rect x="-118" y="-132" width="236" height="14" rx="7" fill="#1e293b"/>
+    <rect x="-118" y="-132" width="118" height="14" rx="7" fill="url(#arcBeam)"/>
+    <text x="0" y="-88" fill="#e2e8f0" font-size="26" text-anchor="middle">$12.50 / $50.00</text>
+    <text x="0" y="-58" fill="#94a3b8" font-size="14" text-anchor="middle">USDC · daily burn</text>
+    <line x1="-118" y1="-26" x2="118" y2="-26" stroke="#ffffff" stroke-opacity="0.12"/>
+    <text x="0" y="8" fill="#7dd3fc" font-size="15" text-anchor="middle" letter-spacing="1.6">TIME WINDOW</text>
+    <text x="0" y="42" fill="#e2e8f0" font-size="22" text-anchor="middle">08:00 – 20:00</text>
+    <text x="0" y="70" fill="#94a3b8" font-size="14" text-anchor="middle">UTC · active now</text>
+    <line x1="-118" y1="102" x2="118" y2="102" stroke="#ffffff" stroke-opacity="0.12"/>
+    <text x="0" y="136" fill="#7dd3fc" font-size="15" text-anchor="middle" letter-spacing="1.6">PER-TX CAP</text>
+    <text x="0" y="170" fill="#34d399" font-size="22" text-anchor="middle">$50.00 USDC</text>
+  </g>
+
+  <!-- ============ Intent-bound allowlist rail (right) ============ -->
+  <g transform="translate(1688 600)" font-family="'JetBrains Mono', monospace">
+    <rect x="-160" y="-196" width="320" height="392" rx="18" fill="#0b1220" fill-opacity="0.66"
+          stroke="#a78bfa" stroke-opacity="0.34" stroke-width="1.5"/>
+    <text x="0" y="-158" fill="#c4b5fd" font-size="15" text-anchor="middle" letter-spacing="1.6">ALLOWLIST</text>
+    <g font-size="17">
+      <g transform="translate(-104 -128)"><circle cx="10" cy="-6" r="7" fill="#34d399"/><text x="30" y="0" fill="#e2e8f0">0xa4d1…9f2c</text></g>
+      <g transform="translate(-104 -92)"><circle cx="10" cy="-6" r="7" fill="#34d399"/><text x="30" y="0" fill="#e2e8f0">0x71c8…b04e</text></g>
+      <g transform="translate(-104 -56)"><circle cx="10" cy="-6" r="7" fill="#34d399"/><text x="30" y="0" fill="#e2e8f0">0x3600…0000</text></g>
+      <g transform="translate(-104 -20)"><circle cx="10" cy="-6" r="7" fill="#f43f5e" fill-opacity="0.9"/><text x="30" y="0" fill="#94a3b8">0xdead…beef</text></g>
+    </g>
+    <line x1="-118" y1="22" x2="118" y2="22" stroke="#ffffff" stroke-opacity="0.12"/>
+    <text x="0" y="56" fill="#c4b5fd" font-size="15" text-anchor="middle" letter-spacing="1.6">SETTLEMENT</text>
+    <text x="0" y="90" fill="#e2e8f0" font-size="22" text-anchor="middle">Arc Mainnet</text>
+    <text x="0" y="118" fill="#94a3b8" font-size="14" text-anchor="middle">chain 5042 · &lt;1.0s</text>
+    <line x1="-118" y1="146" x2="118" y2="146" stroke="#ffffff" stroke-opacity="0.12"/>
+    <text x="0" y="172" fill="#c4b5fd" font-size="15" text-anchor="middle" letter-spacing="1.6">SIGNING</text>
+    <text x="0" y="196" fill="#e2e8f0" font-size="17" text-anchor="middle">non-custodial</text>
+  </g>
+  <!-- Data links between rails and shield -->
+  <g stroke="url(#arcBeam)" stroke-width="1.75" fill="none" stroke-dasharray="7 9" opacity="0.6">
+    <path d="M392 600 H754"/>
+    <path d="M1166 600 H1528"/>
+  </g>
+
+  <!-- Telemetry sparkline along the base -->
+  <g opacity="0.85">
+    <path d="M180 1046 L330 1010 L470 1028 L620 968 L770 992 L920 930 L1070 950 L1220 890 L1370 912 L1520 862 L1670 884 L1740 868"
+          fill="none" stroke="url(#arcBeam)" stroke-width="2.5" stroke-linecap="round"/>
+    <g fill="#67e8f9">
+      <circle cx="620" cy="968" r="4"/><circle cx="920" cy="930" r="4"/><circle cx="1220" cy="890" r="4"/>
+    </g>
+  </g>
+
+  <!-- Bottom vignette so overlaid headline copy keeps AAA contrast -->
+  <rect x="0" y="820" width="1920" height="380" fill="url(#fadeDown)"/>
+
+  <rect x="0.75" y="0.75" width="1918.5" height="1198.5" fill="none"
+        stroke="#ffffff" stroke-opacity="0.10"/>
+</svg>
